@@ -1,0 +1,45 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Home, Search, Shield } from 'lucide-react';
+import { cn } from '@/lib/format';
+
+const ITEMS = [
+  { href: '/legislacao', label: 'Início', icon: Home, match: (p: string) => p === '/legislacao' },
+  { href: '/legislacao#busca', label: 'Buscar', icon: Search, match: (p: string) => p.startsWith('/legislacao') },
+  { href: '/admin/login', label: 'Admin', icon: Shield, match: (p: string) => p.startsWith('/admin') },
+];
+
+export function PublicBottomNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav
+      className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur lg:hidden"
+      aria-label="Navegação principal"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
+      <ul className="mx-auto flex max-w-lg">
+        {ITEMS.map(({ href, label, icon: Icon, match }) => {
+          const active = match(pathname);
+          return (
+            <li key={href} className="flex-1">
+              <Link
+                href={href}
+                className={cn(
+                  'touch-target flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition-colors',
+                  active ? 'text-brand' : 'text-ink-3',
+                )}
+                aria-current={active ? 'page' : undefined}
+              >
+                <Icon className="h-5 w-5" aria-hidden="true" />
+                {label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}

@@ -1,0 +1,119 @@
+export const dynamic = 'force-dynamic';
+
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { Suspense } from 'react';
+import { SkipLink } from '@/components/a11y/SkipLink';
+import { ActCard } from '@/components/public/ActCard';
+import { FilterSidebar } from '@/components/public/FilterSidebar';
+import { MobileFilterDrawer } from '@/components/public/MobileFilterDrawer';
+import { PublicBottomNav } from '@/components/public/PublicBottomNav';
+import { PublicHeader } from '@/components/public/PublicHeader';
+import { SearchHero } from '@/components/public/SearchHero';
+import { getFilterCounts, searchActs } from '@/lib/api';
+
+export const metadata: Metadata = {
+  title: 'Portal de Legislação — LeisMunicipais',
+  description: 'Consulte atos normativos municipais da Prefeitura de Franca/SP',
+};
+
+async function Results({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; tipo?: string; situacao?: string; ano?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
+  const data = await searchActs({
+    q: sp.q,
+    tipo: sp.tipo,
+    situacao: sp.situacao,
+    ano: sp.ano,
+    page: sp.page ? Number(sp.page) : 1,
+  });
+
+  if (data.items.length === 0) {
+    return (
+      <div className="rounded-[14px] border border-line bg-surface p-12 text-center">
+        <p className="text-page-title mb-2">Nenhum resultado</p>
+        <p className="text-[14px] text-ink-3">Tente outros termos ou remova alguns filtros.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-[13px] text-ink-3" role="status">
+        {data.total} {data.total === 1 ? 'ato encontrado' : 'atos encontrados'}
+      </p>
+      <ul className="space-y-4" role="list">
+        {data.items.map((act) => (
+          <li key={act.id}>
+            <ActCard act={act} />
+          </li>
+        ))}
+      </ul>
+      {data.totalPages > 1 && (
+        <nav className="flex justify-center gap-2 pt-4" aria-label="Paginação">
+          {Array.from({ length: data.totalPages }, (_, i) => i + 1).map((p) => (
+            <Link
+              key={p}
+              href={`/legislacao?${new URLSearchParams({ ...sp, page: String(p) } as Record<string, string>)}`}
+              className={`touch-target flex min-w-11 items-center justify-center rounded-[10px] border px-2 text-[13px] font-semibold ${
+                p === data.page
+                  ? 'border-brand bg-brand-soft text-brand'
+                  : 'border-line bg-surface text-ink-2 hover:border-brand'
+              }`}
+              aria-current={p === data.page ? 'page' : undefined}
+            >
+              {p}
+            </Link>
+          ))}
+        </nav>
+      )}
+    </div>
+  );
+}
+
+export default async function LegislacaoPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; tipo?: string; situacao?: string; ano?: string; page?: string }>;
+}) {
+  const counts = await getFilterCounts();
+
+  return (
+    <>
+      <SkipLink />
+      <div className="min-h-dvh bg-canvas pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+        <PublicHeader />
+        <Suspense>
+          <SearchHero />
+        </Suspense>
+        <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+          <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
+            <div className="hidden lg:block">
+              <Suspense>
+                <FilterSidebar counts={counts} />
+              </Suspense>
+            </div>
+            <div>
+              <Suspense>
+                <MobileFilterDrawer counts={counts} />
+              </Suspense>
+              <Suspense
+                fallback={
+                  <div className="rounded-[14px] border border-line bg-surface p-8 text-ink-3">
+                    Carregando resultados...
+                  </div>
+                }
+              >
+                <Results searchParams={searchParams} />
+              </Suspense>
+            </div>
+          </div>
+        </main>
+        <PublicBottomNav />
+      </div>
+    </>
+  );
+}

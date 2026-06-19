@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: leis-municipais-db
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: leis_municipais
+      POSTGRES_PASSWORD: leis_municipais_dev
+      POSTGRES_DB: leis_municipais
+    volumes:
+      - leis_municipais_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leis_municipais -d leis_municipais"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  leis_municipais_pgdata:

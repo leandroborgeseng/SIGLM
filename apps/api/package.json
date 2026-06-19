@@ -1,0 +1,53 @@
+{
+  "name": "@leis-municipais/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/src/main",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --force",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.12",
+    "@nestjs/core": "^11.0.12",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "^11.0.12",
+    "@prisma/client": "^6.5.0",
+    "bcryptjs": "^3.0.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "dejavu-fonts-ttf": "^2.37.3",
+    "mammoth": "^1.12.0",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pdf-parse": "^2.4.5",
+    "pdf-to-img": "^6.2.0",
+    "pdfkit": "^0.19.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.5",
+    "@nestjs/schematics": "^11.0.2",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^22.13.10",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/pdfkit": "^0.17.6",
+    "prisma": "^6.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  },
+  "prisma": {
+    "seed": "ts-node --transpile-only prisma/seed.ts"
+  }
+}

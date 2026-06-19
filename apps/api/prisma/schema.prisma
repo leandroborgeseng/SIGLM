@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth / RBAC ───────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid())
+  nome      String
+  email     String   @unique
+  hashSenha String   @map("hash_senha")
+  roleId    String   @map("role_id")
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  role              Role              @relation(fields: [roleId], references: [id])
+  normativeChanges  NormativeChange[]
+  imports           Import[]
+  ocrReviews        OcrResult[]       @relation("OcrReviewer")
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  nome        String           @unique
+  descricao   String?
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id    String           @id @default(uuid())
+  chave String           @unique
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─── Normas ──────────────────────────────────────────────────────────────────
+
+enum ActType {
+  lei_complementar
+  lei
+  decreto
+  portaria
+  resolucao
+  instrucao_normativa
+}
+
+enum ActSituacao {
+  vigente
+  revogado
+  parcialmente_revogado
+  alterado
+  consolidado
+}
+
+enum PublicationStatus {
+  rascunho
+  em_revisao
+  publicado
+}
+
+model NormativeAct {
+  id                  String            @id @default(uuid())
+  tipo                ActType
+  numero              Int
+  ano                 Int
+  dataAto             DateTime?         @map("data_ato") @db.Date
+  dataPublicacao      DateTime?         @map("data_publicacao") @db.Date
+  ementa              String
+  assunto             String?
+  palavrasChave       String[]          @default([]) @map("palavras_chave")
+  situacao            ActSituacao       @default(vigente)
+  orgaoOrigem         String?           @map("orgao_origem")
+  autoridadeSignataria String?          @map("autoridade_signataria")
+  slug                String            @unique
+  observacoesInternas String?           @map("observacoes_internas") @db.Text
+  statusPublicacao    PublicationStatus @default(rascunho) @map("status_publicacao")
+  searchVector        Unsupported("tsvector")? @map("search_vector")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  units              NormativeUnit[]
+  attachments        Attachment[]
+  imports            Import[]
+  changesAsAlteradora NormativeChange[] @relation("NormaAlteradora")
+  changesAsAlterada  NormativeChange[] @relation("NormaAlterada")
+  unitsOrigem        NormativeUnit[]   @relation("UnitOrigemAct")
+  unitsAlteradoPor   NormativeUnit[]   @relation("UnitAlteradoPorAct")
+  versionsOrigem     NormativeVersion[] @relation("VersionOrigemAct")
+
+  @@unique([tipo, numero, ano])
+  @@index([tipo, ano, numero])
+  @@index([situacao])
+  @@index([statusPublicacao])
+  @@map("normative_acts")
+}
+
+enum UnitType {
+  titulo
+  livro
+  capitulo
+  secao
+  subsecao
+  artigo
+  paragrafo
+  inciso
+  alinea
+  item
+  anexo
+  preambulo
+  ementa
+}
+
+enum UnitStatus {
+  vigente
+  revogada
+  alterada
+  incluida
+}
+
+model NormativeUnit {
+  id               String     @id @default(uuid())
+  actId            String     @map("act_id")
+  tipoUnidade      UnitType   @map("tipo_unidade")
+  identificacao    String?
+  texto            String     @db.Text
+  ordem            Int
+  parentUnitId     String?    @map("parent_unit_id")
+  status           UnitStatus @default(vigente)
+  origemActId      String?    @map("origem_act_id")
+  alteradoPorActId String?    @map("alterado_por_act_id")
+  dataAlteracao    DateTime?  @map("data_alteracao") @db.Date
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  act            NormativeAct      @relation(fields: [actId], references: [id], onDelete: Cascade)
+  parentUnit     NormativeUnit?    @relation("UnitHierarchy", fields: [parentUnitId], references: [id])
+  childUnits     NormativeUnit[]   @relation("UnitHierarchy")
+  origemAct      NormativeAct?     @relation("UnitOrigemAct", fields: [origemActId], references: [id])
+  alteradoPorAct NormativeAct?     @relation("UnitAlteradoPorAct", fields: [alteradoPorActId], references: [id])
+  versions       NormativeVersion[]
+  changes        NormativeChange[]
+
+  @@index([actId, ordem])
+  @@index([parentUnitId])
+  @@map("normative_units")
+}
+
+model NormativeVersion {
+  id           String    @id @default(uuid())
+  unitId       String    @map("unit_id")
+  texto        String    @db.Text
+  validoDe     DateTime  @map("valido_de") @db.Date
+  validoAte    DateTime? @map("valido_ate") @db.Date
+  origemActId  String?   @map("origem_act_id")
+  criadoEm     DateTime  @default(now()) @map("criado_em")
+
+  unit      NormativeUnit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  origemAct NormativeAct?  @relation("VersionOrigemAct", fields: [origemActId], references: [id])
+
+  @@index([unitId, validoDe])
+  @@map("normative_versions")
+}
+
+enum ChangeType {
+  inclusao
+  alteracao_redacao
+  revogacao_parcial
+  revogacao_total
+}
+
+model NormativeChange {
+  id                    String     @id @default(uuid())
+  normaAlteradoraActId  String     @map("norma_alteradora_act_id")
+  normaAlteradaActId    String     @map("norma_alterada_act_id")
+  unitId                String?    @map("unit_id")
+  tipoAlteracao         ChangeType @map("tipo_alteracao")
+  textoAnterior         String?    @map("texto_anterior") @db.Text
+  textoNovo             String?    @map("texto_novo") @db.Text
+  notaGerada            String?    @map("nota_gerada")
+  fundamento            String?
+  data                  DateTime   @db.Date
+  autorId               String?    @map("autor_id")
+  createdAt             DateTime   @default(now()) @map("created_at")
+
+  normaAlteradora NormativeAct  @relation("NormaAlteradora", fields: [normaAlteradoraActId], references: [id])
+  normaAlterada   NormativeAct  @relation("NormaAlterada", fields: [normaAlteradaActId], references: [id])
+  unit            NormativeUnit? @relation(fields: [unitId], references: [id])
+  autor           User?         @relation(fields: [autorId], references: [id])
+
+  @@index([normaAlteradaActId])
+  @@index([normaAlteradoraActId])
+  @@map("normative_changes")
+}
+
+// ─── Arquivos e importação ───────────────────────────────────────────────────
+
+enum AttachmentType {
+  pdf_original
+  digitalizado
+  anexo
+}
+
+model Attachment {
+  id        String         @id @default(uuid())
+  actId     String         @map("act_id")
+  tipo      AttachmentType
+  url       String
+  nome      String
+  tamanho   Int?
+  hash      String?
+  criadoEm  DateTime       @default(now()) @map("criado_em")
+
+  act NormativeAct @relation(fields: [actId], references: [id], onDelete: Cascade)
+
+  @@index([actId])
+  @@map("attachments")
+}
+
+enum ImportFormat {
+  doc
+  docx
+  pdf
+  pdf_ocr
+}
+
+enum ImportStatus {
+  upload
+  conferencia
+  rascunho
+  publicado
+  erro
+}
+
+model Import {
+  id                 String       @id @default(uuid())
+  actId              String?      @map("act_id")
+  arquivo            String
+  formato            ImportFormat
+  lib                String?
+  status             ImportStatus @default(upload)
+  estruturaDetectada Json?        @map("estrutura_detectada")
+  criadoPorId        String?      @map("criado_por")
+  criadoEm           DateTime     @default(now()) @map("criado_em")
+
+  act       NormativeAct? @relation(fields: [actId], references: [id])
+  criadoPor User?         @relation(fields: [criadoPorId], references: [id])
+  ocrResults OcrResult[]
+
+  @@map("imports")
+}
+
+model OcrResult {
+  id           String    @id @default(uuid())
+  importId     String    @map("import_id")
+  pagina       Int
+  texto        String    @db.Text
+  confianca    Json
+  revisadoPorId String?  @map("revisado_por")
+  revisadoEm   DateTime? @map("revisado_em")
+
+  import      Import @relation(fields: [importId], references: [id], onDelete: Cascade)
+  revisadoPor User?  @relation("OcrReviewer", fields: [revisadoPorId], references: [id])
+
+  @@index([importId, pagina])
+  @@map("ocr_results")
+}
+
+// ─── Auditoria ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  acao       String
+  entidade   String
+  entidadeId String?  @map("entidade_id")
+  diff       Json?
+  ip         String?
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entidade, entidadeId])
+  @@index([userId])
+  @@index([criadoEm])
+  @@map("audit_logs")
+}
