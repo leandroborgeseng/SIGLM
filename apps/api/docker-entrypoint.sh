@@ -12,7 +12,12 @@ npx prisma migrate deploy
 
 if [ "$RUN_SEED" = "true" ]; then
   echo "Executando seed..."
-  npx prisma db seed
+  if [ -f dist/prisma/seed.js ]; then
+    node dist/prisma/seed.js
+  else
+    echo "ERRO: dist/prisma/seed.js não encontrado. Rode o build da API."
+    exit 1
+  fi
 fi
 
 echo "Iniciando API..."

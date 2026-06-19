@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && npm run build:seed",
+    "build:seed": "mkdir -p dist/prisma && npx tsc prisma/seed.ts --outDir dist/prisma --module commonjs --target ES2022 --esModuleInterop --skipLibCheck",
     "dev": "nest start --watch",
     "start": "node dist/src/main",
     "db:migrate": "prisma migrate dev",
