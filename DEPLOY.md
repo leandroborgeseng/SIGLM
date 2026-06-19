@@ -164,7 +164,7 @@ API_URL=https://SEU-DOMINIO-API/api
 NODE_ENV=production
 ```
 
-> `API_URL` é usada no SSR em **runtime** (não precisa rebuild). `NEXT_PUBLIC_API_URL` é usada no browser (precisa estar no build — defina antes do deploy).
+> **Railway:** use `API_URL` e `NEXT_PUBLIC_API_URL` com a URL **pública** da API. **Não** defina `API_INTERNAL_URL` no web (valor `http://api:3001/api` só funciona no Docker Compose local).
 
 5. **Settings** → **Networking** → **Generate Domain**  
    Exemplo: `siglm-production.up.railway.app`
