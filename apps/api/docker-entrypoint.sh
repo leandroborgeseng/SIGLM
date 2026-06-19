@@ -1,6 +1,12 @@
 #!/bin/sh
 set -e
 
+if [ -z "$DATABASE_URL" ]; then
+  echo "ERRO: DATABASE_URL não definida."
+  echo "No Railway: serviço API → Variables → Add Reference → Postgres → DATABASE_URL → Apply"
+  exit 1
+fi
+
 echo "Aplicando migrations..."
 npx prisma migrate deploy
 

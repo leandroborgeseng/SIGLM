@@ -120,17 +120,20 @@ Ordem recomendada: **Postgres → API → Web → ajustar CORS**.
 4. **Settings** → **Networking** → **Generate Domain**  
    Exemplo: `siglm-api-production.up.railway.app`  
    Teste depois: `https://SIGLM-API-DOMINIO/api/health`
-5. **Variables** (clique **Add** / **Raw Editor** e **Apply**):
+5. **Variables** — use **Add Reference** (não cole a URL manualmente):
+   - Clique **+ New Variable** → **Add Reference**
+   - Serviço Postgres → variável **`DATABASE_URL`**
+   - Adicione também (Raw Editor ou uma a uma) e clique **Apply Changes**:
 
 ```env
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-JWT_SECRET=<gere com: openssl rand -base64 48>
-JWT_REFRESH_SECRET=<outra chave>
+JWT_SECRET=<sua chave>
+JWT_REFRESH_SECRET=<sua chave>
 RUN_SEED=true
-CORS_ORIGIN=https://placeholder.up.railway.app
+CORS_ORIGIN=https://temporario.up.railway.app
+NODE_ENV=production
 ```
 
-> `CORS_ORIGIN` temporário — atualize após criar o domínio do **web** (passo 5).
+> Se `DATABASE_URL` não aparecer, o nome do serviço Postgres pode ser outro (ex.: `PostgreSQL`). Use **Add Reference** e selecione o serviço do banco — não digite `${{Postgres.DATABASE_URL}}` à mão se o nome não bater.
 
 6. **Settings** → **Volumes** → **Add Volume**:
    - Mount path: `/app/apps/api/uploads`
@@ -251,6 +254,7 @@ RUN_SEED=true docker compose -f docker-compose.prod.yml up -d --build
 
 | Problema | Solução |
 |----------|---------|
+| **DATABASE_URL not found (P1012)** | No serviço **API** → Variables → **Add Reference** → serviço Postgres → `DATABASE_URL` → **Apply Changes** → Redeploy. A variável deve estar no serviço da API, não só no Postgres. |
 | **Railpack: No start command detected** | O Railway tentou build Node automático. Em **Settings → Build**, mude o builder para **Dockerfile** e defina `apps/api/Dockerfile` (API) ou `apps/web/Dockerfile` (Web). O repo inclui `railway.toml` para forçar Docker na API. |
 | Web 500 / não conecta API | Confira `NEXT_PUBLIC_API_URL` e `API_INTERNAL_URL` |
 | CORS bloqueado | `CORS_ORIGIN` deve ser exatamente a URL do frontend |
