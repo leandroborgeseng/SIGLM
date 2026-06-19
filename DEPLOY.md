@@ -156,13 +156,15 @@ NODE_ENV=production
 3. **Settings** → **Build**:
    - **Config File:** `apps/web/railway.toml`
    - **Dockerfile Path:** `apps/web/Dockerfile` *(não use o da API!)*
-4. **Variables** (importante: usadas no **build** do Next.js):
+4. **Variables** (serviço **web** — **sem** `DATABASE_URL`):
 
 ```env
 NEXT_PUBLIC_API_URL=https://SEU-DOMINIO-API/api
+API_URL=https://SEU-DOMINIO-API/api
+NODE_ENV=production
 ```
 
-Substitua `SEU-DOMINIO-API` pelo domínio real gerado no passo 3 (sem barra no final antes de `/api`).
+> `API_URL` é usada no SSR em **runtime** (não precisa rebuild). `NEXT_PUBLIC_API_URL` é usada no browser (precisa estar no build — defina antes do deploy).
 
 5. **Settings** → **Networking** → **Generate Domain**  
    Exemplo: `siglm-production.up.railway.app`
@@ -256,6 +258,7 @@ RUN_SEED=true docker compose -f docker-compose.prod.yml up -d --build
 
 | Problema | Solução |
 |----------|---------|
+| **Application error (digest)** no web | SSR não alcança a API. No serviço **web**, defina `API_URL` e `NEXT_PUBLIC_API_URL` com a URL pública da API (`https://.../api`). Redeploy. Remova `API_INTERNAL_URL` se não usar rede privada. |
 | **Web pede DATABASE_URL** | O serviço web está usando o Dockerfile da API. Em **web → Settings → Build**, defina Config File `apps/web/railway.toml` e Dockerfile `apps/web/Dockerfile`. Remova `DATABASE_URL` das variables do web. |
 | **DATABASE_URL not found (P1012)** | Só no serviço **API** → Variables → **Add Reference** → Postgres → `DATABASE_URL` → **Apply Changes** → Redeploy. |
 | **Railpack: No start command detected** | O Railway tentou build Node automático. Em **Settings → Build**, mude o builder para **Dockerfile** e defina `apps/api/Dockerfile` (API) ou `apps/web/Dockerfile` (Web). O repo inclui `railway.toml` para forçar Docker na API. |

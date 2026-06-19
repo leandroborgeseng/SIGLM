@@ -79,7 +79,36 @@ export default async function LegislacaoPage({
 }: {
   searchParams: Promise<{ q?: string; tipo?: string; situacao?: string; ano?: string; page?: string }>;
 }) {
-  const counts = await getFilterCounts();
+  let counts: Awaited<ReturnType<typeof getFilterCounts>> | null = null;
+  let apiError: string | null = null;
+
+  try {
+    counts = await getFilterCounts();
+  } catch (err) {
+    apiError = err instanceof Error ? err.message : 'Erro ao conectar à API';
+  }
+
+  if (apiError || !counts) {
+    return (
+      <>
+        <SkipLink />
+        <div className="min-h-dvh bg-canvas">
+          <PublicHeader />
+          <main id="main-content" className="mx-auto max-w-2xl px-4 py-16 text-center">
+            <p className="text-page-title mb-2">Portal temporariamente indisponível</p>
+            <p className="text-[14px] text-ink-3 mb-4">
+              Não foi possível carregar os dados da API. Verifique se o serviço da API está no ar.
+            </p>
+            {apiError && (
+              <p className="rounded-[10px] border border-line bg-surface px-4 py-3 text-left text-[13px] text-ink-3 font-mono">
+                {apiError}
+              </p>
+            )}
+          </main>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

@@ -48,6 +48,7 @@ services:
       - api
     environment:
       API_INTERNAL_URL: http://api:3001/api
+      API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
       PORT: 3000
     ports:
       - '3000:3000'
