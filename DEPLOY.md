@@ -78,34 +78,140 @@ RUN_SEED=true
 
 ---
 
-## 4. Railway
+## 4. Railway (passo a passo — SIGLM)
 
-Crie **3 serviços** no mesmo projeto:
+Repositório: `https://github.com/leandroborgeseng/SIGLM`
 
-### A) PostgreSQL
-- Add-on **PostgreSQL**
-- Copie `DATABASE_URL` para o serviço API
+### Visão geral
 
-### B) API
-- **New Service** → GitHub repo
-- **Root Directory:** `/` (raiz do monorepo)
-- **Dockerfile Path:** `apps/api/Dockerfile`
-- Variables:
-  - `DATABASE_URL` (referência ao Postgres)
-  - `JWT_SECRET`, `JWT_REFRESH_SECRET`
-  - `CORS_ORIGIN` = URL pública do frontend
-  - `RUN_SEED=true` (primeiro deploy)
-- Gere domínio público, ex.: `https://leis-api.up.railway.app`
-- A API responde em `/api/health`
+| Serviço Railway | Dockerfile | Domínio |
+|-----------------|------------|---------|
+| **Postgres** | template Railway | interno |
+| **api** | `apps/api/Dockerfile` | `https://siglm-api.up.railway.app` |
+| **web** | `apps/web/Dockerfile` | `https://siglm.up.railway.app` |
 
-### C) Web
-- **New Service** → mesmo repo
-- **Dockerfile Path:** `apps/web/Dockerfile`
-- **Build Args:** `NEXT_PUBLIC_API_URL=https://leis-api.up.railway.app/api`
-- **Runtime Variables:** `API_INTERNAL_URL` não é necessário se SSR usar URL pública; para rede privada Railway use a URL interna do serviço API + `/api`
-- Domínio público do frontend
+Ordem recomendada: **Postgres → API → Web → ajustar CORS**.
 
-> Railway: use a URL **pública** da API em `NEXT_PUBLIC_API_URL` (com sufixo `/api`).
+---
+
+### Passo 1 — Criar projeto
+
+1. Acesse [railway.app](https://railway.app) → **New Project**
+2. Escolha **Deploy from GitHub repo**
+3. Autorize o GitHub e selecione **`leandroborgeseng/SIGLM`** (branch `main`)
+
+---
+
+### Passo 2 — PostgreSQL
+
+1. No projeto: **+ New** → **Database** → **PostgreSQL**
+2. Aguarde provisionar (fica com nome tipo `Postgres`)
+3. Na aba **Variables** do Postgres, anote que existe `DATABASE_URL` (uso interno)
+
+---
+
+### Passo 3 — Serviço API
+
+1. **+ New** → **GitHub Repo** → mesmo repo `SIGLM` (ou duplique o serviço já criado)
+2. Renomeie o serviço para **`api`**
+3. **Settings** → **Build**:
+   - **Root Directory:** *(vazio — raiz do repo)*
+   - **Dockerfile Path:** `apps/api/Dockerfile`
+4. **Settings** → **Networking** → **Generate Domain**  
+   Exemplo: `siglm-api-production.up.railway.app`  
+   Teste depois: `https://SIGLM-API-DOMINIO/api/health`
+5. **Variables** (clique **Add** / **Raw Editor** e **Apply**):
+
+```env
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+JWT_SECRET=<gere com: openssl rand -base64 48>
+JWT_REFRESH_SECRET=<outra chave>
+RUN_SEED=true
+CORS_ORIGIN=https://placeholder.up.railway.app
+```
+
+> `CORS_ORIGIN` temporário — atualize após criar o domínio do **web** (passo 5).
+
+6. **Settings** → **Volumes** → **Add Volume**:
+   - Mount path: `/app/apps/api/uploads`
+   - (Persiste PDFs e anexos importados)
+
+7. **Deploy** — nos logs deve aparecer:
+   - `Aplicando migrations...`
+   - `Executando seed...` (se `RUN_SEED=true`)
+   - `LeisMunicipais API em http://0.0.0.0:...`
+
+8. Confirme: abra `https://SEU-DOMINIO-API/api/health` → deve retornar OK.
+
+---
+
+### Passo 4 — Serviço Web
+
+1. **+ New** → **GitHub Repo** → `SIGLM`
+2. Renomeie para **`web`**
+3. **Settings** → **Build**:
+   - **Dockerfile Path:** `apps/web/Dockerfile`
+4. **Variables** (importante: usadas no **build** do Next.js):
+
+```env
+NEXT_PUBLIC_API_URL=https://SEU-DOMINIO-API/api
+```
+
+Substitua `SEU-DOMINIO-API` pelo domínio real gerado no passo 3 (sem barra no final antes de `/api`).
+
+5. **Settings** → **Networking** → **Generate Domain**  
+   Exemplo: `siglm-production.up.railway.app`
+6. **Deploy** e abra o domínio → `/legislacao` deve listar os atos do seed.
+
+---
+
+### Passo 5 — Ajustar CORS e desligar seed
+
+No serviço **api**, atualize as variables:
+
+```env
+CORS_ORIGIN=https://SEU-DOMINIO-WEB
+RUN_SEED=false
+```
+
+(use a URL exata do web, com `https://`, sem barra final)
+
+**Redeploy** o serviço **api**.
+
+---
+
+### Passo 6 — Login admin
+
+- URL: `https://SEU-DOMINIO-WEB/admin/login`
+- Demo: `admin@franca.sp.gov.br` / `admin123`
+- **Troque a senha em produção.**
+
+---
+
+### Variáveis de referência Railway
+
+| Sintaxe | Uso |
+|---------|-----|
+| `${{Postgres.DATABASE_URL}}` | API → banco |
+| `${{api.RAILWAY_PUBLIC_DOMAIN}}` | Referência cruzada (opcional) |
+
+### Rede privada (opcional, SSR mais rápido)
+
+No serviço **web**, em runtime você pode definir:
+
+```env
+API_INTERNAL_URL=http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}/api
+```
+
+Se der erro, use só a URL pública em `NEXT_PUBLIC_API_URL` (funciona normalmente).
+
+---
+
+### Custos e limites
+
+- Plano gratuito: créditos mensais limitados — 3 serviços + Postgres consomem rápido
+- OCR/importação PDF: considere plano com mais RAM
+- Volume obrigatório para não perder uploads entre deploys
 
 ---
 
@@ -145,6 +251,7 @@ RUN_SEED=true docker compose -f docker-compose.prod.yml up -d --build
 
 | Problema | Solução |
 |----------|---------|
+| **Railpack: No start command detected** | O Railway tentou build Node automático. Em **Settings → Build**, mude o builder para **Dockerfile** e defina `apps/api/Dockerfile` (API) ou `apps/web/Dockerfile` (Web). O repo inclui `railway.toml` para forçar Docker na API. |
 | Web 500 / não conecta API | Confira `NEXT_PUBLIC_API_URL` e `API_INTERNAL_URL` |
 | CORS bloqueado | `CORS_ORIGIN` deve ser exatamente a URL do frontend |
 | Migrations falham | Verifique `DATABASE_URL` e se Postgres está acessível |
