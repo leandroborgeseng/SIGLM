@@ -2,7 +2,7 @@
 set -e
 
 if [ -z "$DATABASE_URL" ]; then
-  echo "ERRO: DATABASE_URL não definida."
+  echo "ERRO: DATABASE_URL não definida (serviço API)."
   echo "No Railway: serviço API → Variables → Add Reference → Postgres → DATABASE_URL → Apply"
   exit 1
 fi

@@ -1,5 +1,5 @@
-# Use este serviço com Root Directory = apps/web NÃO funciona (monorepo).
-# No Railway: serviço "web" → Settings → Build → Dockerfile Path = apps/web/Dockerfile
+# Serviço WEB — no Railway: Settings → Config File = apps/web/railway.toml
+# NÃO precisa de DATABASE_URL
 
 [build]
 builder = "DOCKERFILE"

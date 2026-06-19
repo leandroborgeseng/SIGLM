@@ -116,7 +116,8 @@ Ordem recomendada: **Postgres → API → Web → ajustar CORS**.
 2. Renomeie o serviço para **`api`**
 3. **Settings** → **Build**:
    - **Root Directory:** *(vazio — raiz do repo)*
-   - **Dockerfile Path:** `apps/api/Dockerfile`
+   - **Config File:** `railway.api.toml`
+   - **Dockerfile Path:** `apps/api/Dockerfile` *(confirme que está assim)*
 4. **Settings** → **Networking** → **Generate Domain**  
    Exemplo: `siglm-api-production.up.railway.app`  
    Teste depois: `https://SIGLM-API-DOMINIO/api/health`
@@ -153,7 +154,8 @@ NODE_ENV=production
 1. **+ New** → **GitHub Repo** → `SIGLM`
 2. Renomeie para **`web`**
 3. **Settings** → **Build**:
-   - **Dockerfile Path:** `apps/web/Dockerfile`
+   - **Config File:** `apps/web/railway.toml`
+   - **Dockerfile Path:** `apps/web/Dockerfile` *(não use o da API!)*
 4. **Variables** (importante: usadas no **build** do Next.js):
 
 ```env
@@ -254,7 +256,8 @@ RUN_SEED=true docker compose -f docker-compose.prod.yml up -d --build
 
 | Problema | Solução |
 |----------|---------|
-| **DATABASE_URL not found (P1012)** | No serviço **API** → Variables → **Add Reference** → serviço Postgres → `DATABASE_URL` → **Apply Changes** → Redeploy. A variável deve estar no serviço da API, não só no Postgres. |
+| **Web pede DATABASE_URL** | O serviço web está usando o Dockerfile da API. Em **web → Settings → Build**, defina Config File `apps/web/railway.toml` e Dockerfile `apps/web/Dockerfile`. Remova `DATABASE_URL` das variables do web. |
+| **DATABASE_URL not found (P1012)** | Só no serviço **API** → Variables → **Add Reference** → Postgres → `DATABASE_URL` → **Apply Changes** → Redeploy. |
 | **Railpack: No start command detected** | O Railway tentou build Node automático. Em **Settings → Build**, mude o builder para **Dockerfile** e defina `apps/api/Dockerfile` (API) ou `apps/web/Dockerfile` (Web). O repo inclui `railway.toml` para forçar Docker na API. |
 | Web 500 / não conecta API | Confira `NEXT_PUBLIC_API_URL` e `API_INTERNAL_URL` |
 | CORS bloqueado | `CORS_ORIGIN` deve ser exatamente a URL do frontend |

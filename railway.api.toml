@@ -1,5 +1,4 @@
-# Configuração padrão para o serviço API no Railway.
-# O serviço WEB deve sobrescrever no painel: Dockerfile Path = apps/web/Dockerfile
+# Serviço API — no Railway: Settings → Config File = railway.api.toml
 
 [build]
 builder = "DOCKERFILE"
