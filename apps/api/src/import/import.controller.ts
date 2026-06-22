@@ -61,6 +61,12 @@ export class ImportController {
     return this.imports.getImportDetail(id);
   }
 
+  @Post(':id/reprocess')
+  @RequirePermissions('imports:manage')
+  reprocess(@Param('id') id: string) {
+    return this.imports.reprocessImport(id);
+  }
+
   @Post(':id/reprocess-ocr')
   @RequirePermissions('imports:manage')
   reprocessOcr(@Param('id') id: string) {

@@ -212,6 +212,10 @@ export function getImport(id: string) {
   return adminFetch<ImportDetail>(`/admin/imports/${id}`);
 }
 
+export function reprocessImport(id: string) {
+  return adminFetch<ImportDetail>(`/admin/imports/${id}/reprocess`, { method: 'POST' });
+}
+
 export function reprocessOcr(id: string) {
   return adminFetch<ImportDetail>(`/admin/imports/${id}/reprocess-ocr`, { method: 'POST' });
 }

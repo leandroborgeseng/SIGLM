@@ -14,6 +14,7 @@ import {
   fetchDocxPreviewHtml,
   fetchImportFileUrl,
   getImport,
+  reprocessImport,
   uploadImport,
   type ImportDetail,
 } from '@/lib/admin-api';
@@ -32,30 +33,32 @@ export function ImportPanel() {
   const [docxPreviewHtml, setDocxPreviewHtml] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
   const [meta, setMeta] = useState({ tipo: 'lei', numero: '', ano: String(new Date().getFullYear()), ementa: '' });
 
   const load = useCallback(async (id: string) => {
     const data = await getImport(id);
     setImp(data);
-    if (data.needsOcrReview) {
-      router.push(`/admin/ocr?importId=${id}`);
-      return;
-    }
     const ementaBlock = data.estruturaDetectada?.blocos.find((b) => b.tipo === 'ementa');
     if (ementaBlock) setMeta((m) => ({ ...m, ementa: ementaBlock.texto }));
-  }, [router]);
+    return data;
+  }, []);
 
   useEffect(() => {
     if (importId) load(importId).catch(() => toast('Importação não encontrada', 'danger'));
   }, [importId, load, toast]);
 
   useEffect(() => {
-    if (!importId || !imp || imp.status !== 'processando') return;
+    if (!importId || !imp) return;
+    const waiting =
+      imp.status === 'processando' ||
+      (imp.status === 'upload' && imp.formato === 'pdf_ocr' && imp.ocrResults.length === 0);
+    if (!waiting) return;
     const timer = setInterval(() => {
       load(importId).catch(() => undefined);
     }, 2000);
     return () => clearInterval(timer);
-  }, [importId, imp?.status, load]);
+  }, [importId, imp, load]);
 
   useEffect(() => {
     if (!imp?.id || imp.formato !== 'docx') {
@@ -97,15 +100,29 @@ export function ImportPanel() {
       if (data.needsOcrReview) {
         toast('PDF digitalizado — revise o OCR antes de continuar', 'warn');
         router.push(`/admin/ocr?importId=${data.id}`);
-      } else {
-        toast('Arquivo processado — confira a estrutura', 'ok');
-        router.push(`/admin/importar?id=${data.id}`);
-        setImp(data);
+        return;
       }
+      toast('Arquivo processado — confira a estrutura', 'ok');
+      router.push(`/admin/importar?id=${data.id}`);
+      setImp(data);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro no upload', 'danger');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleReprocess = async () => {
+    if (!imp) return;
+    setReprocessing(true);
+    try {
+      const data = await reprocessImport(imp.id);
+      setImp(data);
+      toast('Reprocessando arquivo...', 'ok');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao reprocessar', 'danger');
+    } finally {
+      setReprocessing(false);
     }
   };
 
@@ -132,11 +149,17 @@ export function ImportPanel() {
     ? 0
     : imp.status === 'processando'
       ? 0
-      : imp.status === 'conferencia'
-        ? 1
-        : imp.status === 'rascunho'
-          ? 2
-          : 0;
+      : imp.needsOcrReview
+        ? 0
+        : imp.status === 'conferencia'
+          ? 1
+          : imp.status === 'rascunho'
+            ? 2
+            : 0;
+
+  const readyForConference = Boolean(imp?.estruturaDetectada?.blocos?.length);
+  const waitingProcessing = imp?.status === 'processando';
+  const failedProcessing = imp?.status === 'erro';
 
   return (
     <>
@@ -177,9 +200,32 @@ export function ImportPanel() {
           </label>
         )}
 
-        {imp && imp.status === 'processando' && (
+        {imp && waitingProcessing && (
           <div className="mb-6 rounded-[14px] border border-brand-soft bg-brand-soft/40 px-4 py-3 text-[13px] text-brand">
             Processando arquivo (extração/OCR). Esta página atualiza automaticamente.
+          </div>
+        )}
+
+        {imp && failedProcessing && (
+          <div className="mb-6 rounded-[14px] border border-danger-bd bg-danger-bg px-4 py-3 text-[13px] text-danger">
+            Falha ao processar o arquivo. Tente reprocessar ou envie outro documento.
+          </div>
+        )}
+
+        {imp && imp.needsOcrReview && (
+          <div className="mb-6 flex flex-col gap-3 rounded-[14px] border border-warn-bd bg-warn-bg px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-[13px] text-warn">
+              <strong>PDF digitalizado detectado.</strong> Revise o texto reconhecido por OCR antes da conferência.
+            </div>
+            <Link href={`/admin/ocr?importId=${imp.id}`}>
+              <Button>Ir para revisão OCR →</Button>
+            </Link>
+          </div>
+        )}
+
+        {imp && !waitingProcessing && !failedProcessing && !imp.needsOcrReview && readyForConference && (
+          <div className="mb-6 rounded-[14px] border border-ok-bd bg-ok-bg px-4 py-3 text-[13px] text-ok">
+            Estrutura identificada — revise os blocos abaixo e clique em <strong>Confirmar e salvar como rascunho</strong>.
           </div>
         )}
 
@@ -264,7 +310,15 @@ export function ImportPanel() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-[13px] text-ink-3">Aguardando processamento ou revisão OCR</p>
+                  <p className="text-[13px] text-ink-3">
+                    {waitingProcessing
+                      ? 'Extraindo texto e identificando dispositivos...'
+                      : imp.needsOcrReview
+                        ? 'Aguardando revisão OCR — use o botão acima.'
+                        : failedProcessing
+                          ? 'Processamento falhou — use Reprocessar.'
+                          : 'Nenhuma estrutura identificada neste arquivo.'}
+                  </p>
                 )}
                 <p className="mt-3 text-[12px] text-warn">Revise manualmente trechos com confiança &lt; 80%</p>
               </div>
@@ -280,7 +334,15 @@ export function ImportPanel() {
                   <Button variant="outlined" onClick={() => router.push('/admin/importar')}>
                     Novo upload
                   </Button>
-                  <Button onClick={handleConfirm} disabled={confirming || !imp.estruturaDetectada}>
+                  {(failedProcessing || (!readyForConference && !waitingProcessing && !imp.needsOcrReview)) && (
+                    <Button variant="outlined" onClick={handleReprocess} disabled={reprocessing}>
+                      {reprocessing ? 'Reprocessando...' : 'Reprocessar arquivo'}
+                    </Button>
+                  )}
+                  <Button
+                    onClick={handleConfirm}
+                    disabled={confirming || !readyForConference || imp.needsOcrReview || waitingProcessing}
+                  >
                     {confirming ? 'Salvando...' : 'Confirmar e salvar como rascunho'}
                   </Button>
                 </>

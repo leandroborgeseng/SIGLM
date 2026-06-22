@@ -112,6 +112,11 @@ export class ImportService {
         });
       }
 
+      await this.prisma.import.update({
+        where: { id: importId },
+        data: { status: ImportStatus.upload },
+      });
+
       return this.getImportDetail(importId);
     }
 
@@ -125,6 +130,23 @@ export class ImportService {
       },
     });
 
+    return this.getImportDetail(importId);
+  }
+
+  async reprocessImport(importId: string) {
+    const imp = await this.prisma.import.findUnique({ where: { id: importId } });
+    if (!imp) throw new NotFoundException('Importação não encontrada');
+    if (imp.actId) throw new BadRequestException('Importação já confirmada');
+
+    await this.prisma.import.update({
+      where: { id: importId },
+      data: {
+        status: ImportStatus.processando,
+        estruturaDetectada: Prisma.JsonNull,
+      },
+    });
+
+    void this.runProcessImport(importId);
     return this.getImportDetail(importId);
   }
 
