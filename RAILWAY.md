@@ -81,7 +81,7 @@ GET https://SEU-DOMINIO-BACKEND/api/health
 
 ### Variables (Raw Editor)
 
-Use **Add Reference** para pegar o domínio do backend automaticamente:
+**Apague tudo** e cole somente isto. Use **Add Reference** para as URLs do backend:
 
 ```env
 NODE_ENV=production
@@ -91,6 +91,18 @@ API_INTERNAL_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}/ap
 ```
 
 > Se o serviço da API não se chama `backend`, troque `backend` pelo nome exato no Railway.
+
+### ⚠️ Erro comum: `siglm.railway.internal` ou `https://...railway.internal`
+
+| Errado | Certo |
+|--------|-------|
+| `https://siglm.railway.internal/api` | `https://backend-production-xxxx.up.railway.app/api` |
+| `NEXT_PUBLIC_API_URL` com domínio interno | Sempre URL **pública** com `https://` |
+| `API_INTERNAL_URL` com `https://` | Sempre `http://` + `${{backend.RAILWAY_PRIVATE_DOMAIN}}` |
+
+O browser **nunca** acessa `.railway.internal` — só o servidor (SSR) usa essa rede.
+
+**Depois de corrigir as variables:** Apply Changes → **Redeploy** do web (obrigatório para `NEXT_PUBLIC_API_URL`).
 
 ### O que NÃO colocar no web
 
@@ -142,6 +154,7 @@ RUN_SEED           ❌
 | `No start command detected` | Railpack em vez de Docker | Config File + Dockerfile corretos |
 | `DATABASE_URL not found` | Variável só no Postgres | Add Reference no **backend** |
 | Web pede `DATABASE_URL` | Web usando Dockerfile da API | Web: `apps/web/railway.toml` + `apps/web/Dockerfile` |
+| `https://siglm.railway.internal/api` no web | URL interna no browser ou com HTTPS | Use `${{backend.RAILWAY_PUBLIC_DOMAIN}}` em `NEXT_PUBLIC_API_URL` e `API_URL`; `http://` só em `API_INTERNAL_URL` |
 | `http://api:3001/api` no web | `API_INTERNAL_URL` errada | Use referências `${{backend.*}}` ou URL pública |
 | `ts-node ENOENT` no seed | Versão antiga | Pull `main` (seed compila para JS) |
 | Application error no web | API offline ou URL errada | Confira `API_URL` e health da API |
