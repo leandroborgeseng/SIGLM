@@ -103,18 +103,7 @@ export class ImportService {
       });
 
       const ocrPages = await this.ocr.processPdf(filePath);
-      await this.prisma.ocrResult.deleteMany({ where: { importId } });
-
-      for (const page of ocrPages) {
-        await this.prisma.ocrResult.create({
-          data: {
-            importId,
-            pagina: page.pagina,
-            texto: page.texto,
-            confianca: page.confianca as unknown as Prisma.InputJsonValue,
-          },
-        });
-      }
+      await this.saveOcrResults(importId, ocrPages);
 
       await this.prisma.import.update({
         where: { id: importId },
@@ -162,7 +151,54 @@ export class ImportService {
     const imp = await this.ensureOcrImport(importId);
     const filePath = path.join(this.uploadDir, imp.arquivo);
 
-    const ocrPages = await this.ocr.processPdf(filePath);
+    try {
+      await fs.access(filePath);
+    } catch {
+      throw new BadRequestException(
+        'Arquivo da importação não encontrado no servidor. Faça upload novamente.',
+      );
+    }
+
+    await this.prisma.import.update({
+      where: { id: importId },
+      data: {
+        status: ImportStatus.processando,
+        estruturaDetectada: Prisma.JsonNull,
+        lib: 'tesseract.js',
+      },
+    });
+    await this.prisma.ocrResult.deleteMany({ where: { importId } });
+
+    void this.runReprocessOcr(importId, filePath);
+
+    return this.getImportDetail(importId);
+  }
+
+  private async runReprocessOcr(importId: string, filePath: string) {
+    try {
+      const ocrPages = await this.ocr.processPdf(filePath);
+      await this.saveOcrResults(importId, ocrPages);
+      await this.prisma.import.update({
+        where: { id: importId },
+        data: { status: ImportStatus.upload, formato: ImportFormat.pdf_ocr },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro desconhecido';
+      console.error(`[import] OCR falhou ${importId}:`, err);
+      await this.prisma.import.update({
+        where: { id: importId },
+        data: {
+          status: ImportStatus.erro,
+          lib: `erro: ${message.slice(0, 240)}`,
+        },
+      });
+    }
+  }
+
+  private async saveOcrResults(
+    importId: string,
+    ocrPages: Awaited<ReturnType<OcrService['processPdf']>>,
+  ) {
     await this.prisma.ocrResult.deleteMany({ where: { importId } });
 
     for (const page of ocrPages) {
@@ -172,18 +208,9 @@ export class ImportService {
           pagina: page.pagina,
           texto: page.texto,
           confianca: page.confianca as unknown as Prisma.InputJsonValue,
-          revisadoPorId: null,
-          revisadoEm: null,
         },
       });
     }
-
-    await this.prisma.import.update({
-      where: { id: importId },
-      data: { status: ImportStatus.upload, estruturaDetectada: Prisma.JsonNull },
-    });
-
-    return this.getImportDetail(importId);
   }
 
   async updateOcrText(

@@ -79,7 +79,7 @@ export class ImportController {
   }
 
   @Post(':id/ocr/approve')
-  @RequirePermissions('ocr:review')
+  @RequirePermissions('imports:manage')
   approveOcr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.imports.approveOcr(id, user.id);
   }

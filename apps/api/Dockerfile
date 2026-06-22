@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 FROM node:20-bookworm-slim AS base
 RUN apt-get update -y \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends \
+    openssl ca-certificates \
+    fontconfig libfontconfig1 libfreetype6 \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
@@ -32,7 +34,10 @@ COPY apps/api/docker-entrypoint.sh ./apps/api/docker-entrypoint.sh
 
 WORKDIR /app/apps/api
 RUN chmod +x docker-entrypoint.sh \
-  && mkdir -p uploads uploads/attachments
+  && mkdir -p uploads uploads/attachments .tesseract-cache
+
+# Pré-baixa modelo OCR português (evita timeout na primeira requisição)
+RUN node -e "const {createWorker}=require('tesseract.js');const p=require('path');(async()=>{const w=await createWorker('por',1,{cachePath:p.join(process.cwd(),'.tesseract-cache')});await w.terminate();})().catch(e=>{console.error(e);process.exit(1);})"
 
 EXPOSE 3001
 ENTRYPOINT ["./docker-entrypoint.sh"]

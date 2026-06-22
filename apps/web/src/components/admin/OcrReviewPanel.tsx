@@ -29,11 +29,24 @@ export function OcrReviewPanel() {
     const data = await getImport(id);
     setImp(data);
     setPages(data.ocrResults.map((r) => ({ pagina: r.pagina, texto: r.texto })));
+    return data;
   }, []);
 
   useEffect(() => {
     if (importId) load(importId).catch(() => toast('Importação não encontrada', 'danger'));
   }, [importId, load, toast]);
+
+  useEffect(() => {
+    if (!importId || !imp) return;
+    const waiting =
+      imp.status === 'processando' ||
+      (imp.formato === 'pdf_ocr' && imp.ocrResults.length === 0 && imp.status !== 'erro');
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      load(importId).catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [importId, imp, load]);
 
   useEffect(() => {
     if (!importId) {
@@ -64,7 +77,7 @@ export function OcrReviewPanel() {
       const data = await reprocessOcr(importId);
       setImp(data);
       setPages(data.ocrResults.map((r) => ({ pagina: r.pagina, texto: r.texto })));
-      toast('OCR reprocessado', 'ok');
+      toast('Processando OCR em segundo plano...', 'ok');
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao reprocessar', 'danger');
     } finally {
@@ -104,6 +117,21 @@ export function OcrReviewPanel() {
             Nenhuma importação selecionada. Faça upload de um PDF digitalizado em{' '}
             <a href="/admin/importar" className="text-brand hover:underline">Importar</a>.
           </p>
+        )}
+
+        {imp && imp.status === 'processando' && (
+          <div className="mb-6 rounded-[14px] border border-brand-soft bg-brand-soft/40 px-4 py-3 text-[13px] text-brand">
+            Processando OCR (pode levar alguns minutos). Esta página atualiza automaticamente.
+          </div>
+        )}
+
+        {imp && imp.status === 'erro' && (
+          <div className="mb-6 rounded-[14px] border border-danger-bd bg-danger-bg px-4 py-3 text-[13px] text-danger">
+            <p>Falha no OCR. Tente reprocessar ou envie o arquivo novamente.</p>
+            {imp.lib?.startsWith('erro:') && (
+              <p className="mt-2 font-mono text-[12px] opacity-90">{imp.lib.replace(/^erro:\s*/, '')}</p>
+            )}
+          </div>
         )}
 
         {imp && (
@@ -158,10 +186,10 @@ export function OcrReviewPanel() {
             )}
 
             <div className="mt-6 flex gap-2">
-              <Button variant="outlined" onClick={handleReprocess} disabled={loading}>
-                Reprocessar OCR
+              <Button variant="outlined" onClick={handleReprocess} disabled={loading || imp.status === 'processando'}>
+                {imp.status === 'processando' ? 'Processando OCR...' : 'Reprocessar OCR'}
               </Button>
-              <Button onClick={handleApprove} disabled={loading}>
+              <Button onClick={handleApprove} disabled={loading || imp.status === 'processando' || imp.ocrResults.length === 0}>
                 {loading ? 'Salvando...' : 'Revisar e aprovar'}
               </Button>
             </div>

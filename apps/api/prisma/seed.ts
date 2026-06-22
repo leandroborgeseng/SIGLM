@@ -33,7 +33,7 @@ const ROLES: Record<string, { descricao: string; permissions: string[] }> = {
   },
   editor: {
     descricao: 'Editor legislativo',
-    permissions: ['acts:read', 'acts:write', 'imports:manage'],
+    permissions: ['acts:read', 'acts:write', 'imports:manage', 'ocr:review'],
   },
   revisor: {
     descricao: 'Revisor de textos normativos',
