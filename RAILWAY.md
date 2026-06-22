@@ -46,11 +46,14 @@ Criado via **+ New → Database → PostgreSQL**. Não precisa de variables manu
 ```env
 NODE_ENV=production
 DATABASE_URL=${{Postgres.DATABASE_URL}}
+PORT=3001
 JWT_SECRET=1HOYyqtuN4GUzgu6STch7yvP//i8VUmYW3b/X/IrLrHQdHI88QW/gWEDXu9aHfsx
 JWT_REFRESH_SECRET=CsD5+oSJFVUZryJg7BlMW5OG2patCLyRPPIbj0nrZK2tO/vbFrpodC6e48VKXZtX
 CORS_ORIGIN=https://modest-mindfulness-production-8488.up.railway.app
-RUN_SEED=true
+RUN_SEED=false
 ```
+
+> `PORT=3001` fixa a porta interna para o web conectar via rede privada.
 
 > **Primeiro deploy:** `RUN_SEED=true` (cria admin + leis exemplo).  
 > **Depois que subir:** mude para `RUN_SEED=false` e redeploy.
@@ -81,35 +84,24 @@ GET https://SEU-DOMINIO-BACKEND/api/health
 
 ### Variables (Raw Editor)
 
-**Apague tudo** e deixe **somente** isto (use **Add Reference**):
+**Apague tudo** e deixe **somente** isto (use **Add Reference** no domínio privado):
 
 ```env
 NODE_ENV=production
-API_INTERNAL_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}/api
+API_INTERNAL_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:3001/api
 ```
 
-> O browser usa proxy `/api/backend`. O servidor (SSR + proxy) usa **rede privada** — sem egress e sem warning.
+> **Use `:3001` fixo** — `${{backend.PORT}}` não funciona como referência entre serviços no Railway (fica vazio → `siglm.railway.internal:/api`).
 >
-> **Não use** `API_URL` com `RAILWAY_PUBLIC_DOMAIN` no web (gera aviso de egress).
+> O nome do serviço (`backend`) deve ser o **nome exato** do serviço da API no Railway. Se for `siglm`, use `${{siglm.RAILWAY_PRIVATE_DOMAIN}}`.
 
 ### O que NÃO colocar no web
 
 ```env
-API_URL              ❌ (use API_INTERNAL_URL)
-NEXT_PUBLIC_API_URL  ❌
-DATABASE_URL         ❌
-JWT_SECRET           ❌
-JWT_REFRESH_SECRET   ❌
-POSTGRES_*           ❌
-CORS_ORIGIN          ❌
-RUN_SEED             ❌
+API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api   ❌ egress
+NEXT_PUBLIC_API_URL                                     ❌
+DATABASE_URL                                            ❌
 ```
-
-### ⚠️ Se ainda aparecer `siglm.railway.internal`
-
-1. Apague `API_URL` e `NEXT_PUBLIC_API_URL`
-2. Use só `API_INTERNAL_URL` com `${{backend.RAILWAY_PRIVATE_DOMAIN}}` e `${{backend.PORT}}`
-3. **Apply Changes** → **Redeploy**
 
 ---
 
@@ -150,7 +142,7 @@ RUN_SEED             ❌
 | `No start command detected` | Railpack em vez de Docker | Config File + Dockerfile corretos |
 | `DATABASE_URL not found` | Variável só no Postgres | Add Reference no **backend** |
 | Web pede `DATABASE_URL` | Web usando Dockerfile da API | Web: `apps/web/railway.toml` + `apps/web/Dockerfile` |
-| `https://siglm.railway.internal/api` no web | URL interna no browser ou com HTTPS | Use `${{backend.RAILWAY_PUBLIC_DOMAIN}}` em `NEXT_PUBLIC_API_URL` e `API_URL`; `http://` só em `API_INTERNAL_URL` |
+| `siglm.railway.internal:/api` (porta vazia) | `${{backend.PORT}}` não existe entre serviços | Use `:3001` fixo e `PORT=3001` no backend |
 | `http://api:3001/api` no web | `API_INTERNAL_URL` errada | Use referências `${{backend.*}}` ou URL pública |
 | `ts-node ENOENT` no seed | Versão antiga | Pull `main` (seed compila para JS) |
 | Application error no web | API offline ou URL errada | Confira `API_URL` e health da API |
@@ -164,5 +156,5 @@ RUN_SEED             ❌
 | Sintaxe | Uso |
 |---------|-----|
 | `${{Postgres.DATABASE_URL}}` | API → banco |
-| `${{backend.RAILWAY_PRIVATE_DOMAIN}}` | Web → API via rede privada (recomendado) |
-| `${{backend.PORT}}` | Porta interna da API no Railway |
+| `${{backend.RAILWAY_PRIVATE_DOMAIN}}` | Web → API via rede privada |
+| `:3001` | Porta fixa (defina `PORT=3001` no backend) |
