@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-function getUpstreamBase(): string {
-  for (const url of [process.env.API_URL, process.env.NEXT_PUBLIC_API_URL]) {
-    if (!url) continue;
-    if (url.includes('.railway.internal')) continue;
-    return url.replace(/\/$/, '');
-  }
-  return 'http://localhost:3001/api';
-}
+import { getServerApiUrl } from '@/lib/server-api-url';
 
 async function proxy(req: NextRequest, path: string[]) {
-  const upstream = `${getUpstreamBase()}/${path.join('/')}${req.nextUrl.search}`;
+  const upstream = `${getServerApiUrl()}/${path.join('/')}${req.nextUrl.search}`;
 
   const headers = new Headers();
   const auth = req.headers.get('authorization');
@@ -32,7 +24,7 @@ async function proxy(req: NextRequest, path: string[]) {
     res = await fetch(upstream, init);
   } catch {
     return NextResponse.json(
-      { message: `API indisponível (${getUpstreamBase()})` },
+      { message: `API indisponível (${getServerApiUrl()})` },
       { status: 502 },
     );
   }

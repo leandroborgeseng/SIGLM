@@ -81,31 +81,35 @@ GET https://SEU-DOMINIO-BACKEND/api/health
 
 ### Variables (Raw Editor)
 
-**Apague tudo** e deixe **somente** isto (use Add Reference no `API_URL`):
+**Apague tudo** e deixe **somente** isto (use **Add Reference**):
 
 ```env
 NODE_ENV=production
-API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api
+API_INTERNAL_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}/api
 ```
 
-> O browser usa proxy interno `/api/backend` — **não precisa** de `NEXT_PUBLIC_API_URL` nem `API_INTERNAL_URL`.
-
-### ⚠️ Se ainda aparecer `siglm.railway.internal`
-
-1. Apague `API_INTERNAL_URL`, `NEXT_PUBLIC_API_URL` e qualquer URL com `.railway.internal`
-2. Deixe **só** `API_URL` com domínio **público** (`*.up.railway.app`)
-3. **Apply Changes** → **Redeploy** (rebuild obrigatório)
+> O browser usa proxy `/api/backend`. O servidor (SSR + proxy) usa **rede privada** — sem egress e sem warning.
+>
+> **Não use** `API_URL` com `RAILWAY_PUBLIC_DOMAIN` no web (gera aviso de egress).
 
 ### O que NÃO colocar no web
 
 ```env
-DATABASE_URL       ❌
-JWT_SECRET         ❌
-JWT_REFRESH_SECRET ❌
-POSTGRES_*         ❌
-CORS_ORIGIN        ❌
-RUN_SEED           ❌
+API_URL              ❌ (use API_INTERNAL_URL)
+NEXT_PUBLIC_API_URL  ❌
+DATABASE_URL         ❌
+JWT_SECRET           ❌
+JWT_REFRESH_SECRET   ❌
+POSTGRES_*           ❌
+CORS_ORIGIN          ❌
+RUN_SEED             ❌
 ```
+
+### ⚠️ Se ainda aparecer `siglm.railway.internal`
+
+1. Apague `API_URL` e `NEXT_PUBLIC_API_URL`
+2. Use só `API_INTERNAL_URL` com `${{backend.RAILWAY_PRIVATE_DOMAIN}}` e `${{backend.PORT}}`
+3. **Apply Changes** → **Redeploy**
 
 ---
 
@@ -160,6 +164,5 @@ RUN_SEED           ❌
 | Sintaxe | Uso |
 |---------|-----|
 | `${{Postgres.DATABASE_URL}}` | API → banco |
-| `${{backend.RAILWAY_PUBLIC_DOMAIN}}` | Web → URL pública da API |
-| `${{backend.RAILWAY_PRIVATE_DOMAIN}}` | Web → SSR via rede interna |
-| `${{backend.PORT}}` | Porta interna da API |
+| `${{backend.RAILWAY_PRIVATE_DOMAIN}}` | Web → API via rede privada (recomendado) |
+| `${{backend.PORT}}` | Porta interna da API no Railway |
