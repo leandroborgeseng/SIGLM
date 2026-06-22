@@ -38,11 +38,10 @@ export class OcrService {
       },
     });
 
-    let document: Awaited<ReturnType<typeof pdf>> | null = null;
+    let pagina = 0;
 
     try {
-      document = await pdf(filePath, { scale: 2 });
-      let pagina = 0;
+      const document = await pdf(filePath, { scale: 2 });
 
       for await (const image of document) {
         pagina++;
@@ -69,9 +68,6 @@ export class OcrService {
       }
     } finally {
       await worker.terminate();
-      if (document && !document.isDestroyed) {
-        await document.destroy();
-      }
     }
 
     if (results.length === 0) {
