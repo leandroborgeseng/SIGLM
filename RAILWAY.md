@@ -81,28 +81,20 @@ GET https://SEU-DOMINIO-BACKEND/api/health
 
 ### Variables (Raw Editor)
 
-**Apague tudo** e cole somente isto. Use **Add Reference** para as URLs do backend:
+**Apague tudo** e deixe **somente** isto (use Add Reference no `API_URL`):
 
 ```env
 NODE_ENV=production
-NEXT_PUBLIC_API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api
 API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api
-API_INTERNAL_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}/api
 ```
 
-> Se o serviço da API não se chama `backend`, troque `backend` pelo nome exato no Railway.
+> O browser usa proxy interno `/api/backend` — **não precisa** de `NEXT_PUBLIC_API_URL` nem `API_INTERNAL_URL`.
 
-### ⚠️ Erro comum: `siglm.railway.internal` ou `https://...railway.internal`
+### ⚠️ Se ainda aparecer `siglm.railway.internal`
 
-| Errado | Certo |
-|--------|-------|
-| `https://siglm.railway.internal/api` | `https://backend-production-xxxx.up.railway.app/api` |
-| `NEXT_PUBLIC_API_URL` com domínio interno | Sempre URL **pública** com `https://` |
-| `API_INTERNAL_URL` com `https://` | Sempre `http://` + `${{backend.RAILWAY_PRIVATE_DOMAIN}}` |
-
-O browser **nunca** acessa `.railway.internal` — só o servidor (SSR) usa essa rede.
-
-**Depois de corrigir as variables:** Apply Changes → **Redeploy** do web (obrigatório para `NEXT_PUBLIC_API_URL`).
+1. Apague `API_INTERNAL_URL`, `NEXT_PUBLIC_API_URL` e qualquer URL com `.railway.internal`
+2. Deixe **só** `API_URL` com domínio **público** (`*.up.railway.app`)
+3. **Apply Changes** → **Redeploy** (rebuild obrigatório)
 
 ### O que NÃO colocar no web
 

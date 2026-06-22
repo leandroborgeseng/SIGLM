@@ -18,8 +18,6 @@ export interface LoginResponse {
   user: AuthUser;
 }
 
-const API_URL = getApiBaseUrl();
-
 export function setAuthCookies(accessToken: string, refreshToken: string) {
   const secure = location.protocol === 'https:' ? '; Secure' : '';
   document.cookie = `${ACCESS_TOKEN_COOKIE}=${accessToken}; path=/; max-age=900; SameSite=Lax${secure}`;
@@ -32,7 +30,7 @@ export function clearAuthCookies() {
 }
 
 export async function login(email: string, senha: string): Promise<LoginResponse> {
-  const res = await fetch(`${API_URL}/auth/login`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, senha }),
@@ -46,7 +44,7 @@ export async function login(email: string, senha: string): Promise<LoginResponse
 }
 
 export async function fetchMe(token: string): Promise<AuthUser> {
-  const res = await fetch(`${API_URL}/auth/me`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
   });
@@ -55,7 +53,7 @@ export async function fetchMe(token: string): Promise<AuthUser> {
 }
 
 export async function refreshSession(refreshToken: string): Promise<LoginResponse> {
-  const res = await fetch(`${API_URL}/auth/refresh`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken }),

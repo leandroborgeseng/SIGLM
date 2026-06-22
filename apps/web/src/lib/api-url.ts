@@ -1,4 +1,5 @@
 const FALLBACK = 'http://localhost:3001/api';
+const PROXY = '/api/backend';
 
 function isRailwayInternal(url: string): boolean {
   try {
@@ -8,36 +9,21 @@ function isRailwayInternal(url: string): boolean {
   }
 }
 
-/** Rede privada Railway só aceita HTTP, nunca HTTPS. */
-function normalizeRailwayUrl(url: string): string {
-  if (isRailwayInternal(url) && url.startsWith('https://')) {
-    return url.replace(/^https:\/\//, 'http://');
+function getPublicApiUrl(): string | null {
+  for (const url of [process.env.API_URL, process.env.NEXT_PUBLIC_API_URL]) {
+    if (url && !isRailwayInternal(url)) return url;
   }
-  return url;
-}
-
-function isPublicUrl(url: string): boolean {
-  return !isRailwayInternal(url) && (url.startsWith('https://') || url.startsWith('http://'));
+  return null;
 }
 
 /** URL base da API (com sufixo /api). */
 export function getApiBaseUrl(): string {
-  // Browser: só URL pública — .railway.internal não é acessível no cliente
+  // Browser em produção: proxy same-origin (sem CORS, sem env no build)
   if (typeof window !== 'undefined') {
-    const pub = process.env.NEXT_PUBLIC_API_URL;
-    if (pub && isPublicUrl(pub)) return pub;
-    return FALLBACK;
+    if (process.env.NODE_ENV === 'production') return PROXY;
+    return process.env.NEXT_PUBLIC_API_URL ?? FALLBACK;
   }
 
-  // SSR: rede privada Railway (HTTP) → URL pública → fallback
-  const internal = process.env.API_INTERNAL_URL;
-  if (internal) return normalizeRailwayUrl(internal);
-
-  const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-  if (apiUrl) {
-    if (isRailwayInternal(apiUrl)) return normalizeRailwayUrl(apiUrl);
-    if (isPublicUrl(apiUrl)) return apiUrl;
-  }
-
-  return FALLBACK;
+  // SSR: só URL pública em runtime — nunca .railway.internal
+  return getPublicApiUrl() ?? FALLBACK;
 }
