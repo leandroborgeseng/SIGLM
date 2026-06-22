@@ -43,20 +43,36 @@ Criado via **+ New → Database → PostgreSQL**. Não precisa de variables manu
 
 ### Variables (Raw Editor)
 
+**Apague tudo** e deixe **somente** isto:
+
 ```env
 NODE_ENV=production
-DATABASE_URL=${{Postgres.DATABASE_URL}}
 PORT=3001
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 JWT_SECRET=1HOYyqtuN4GUzgu6STch7yvP//i8VUmYW3b/X/IrLrHQdHI88QW/gWEDXu9aHfsx
 JWT_REFRESH_SECRET=CsD5+oSJFVUZryJg7BlMW5OG2patCLyRPPIbj0nrZK2tO/vbFrpodC6e48VKXZtX
 CORS_ORIGIN=https://modest-mindfulness-production-8488.up.railway.app
 RUN_SEED=false
 ```
 
-> `PORT=3001` fixa a porta interna para o web conectar via rede privada.
+| Variável | Obrigatória | Descrição |
+|----------|-------------|-----------|
+| `PORT` | ✅ | `3001` — porta interna para `siglm-backend.railway.internal:3001` |
+| `DATABASE_URL` | ✅ | Add Reference → Postgres |
+| `JWT_SECRET` | ✅ | Chave longa aleatória |
+| `JWT_REFRESH_SECRET` | ✅ | Outra chave longa |
+| `CORS_ORIGIN` | ✅ | URL exata do **web** (sem `/` no final) |
+| `RUN_SEED` | ⚠️ | `true` só no **primeiro** deploy; depois `false` |
 
-> **Primeiro deploy:** `RUN_SEED=true` (cria admin + leis exemplo).  
-> **Depois que subir:** mude para `RUN_SEED=false` e redeploy.
+### O que NÃO colocar no siglm-backend
+
+```env
+API_URL              ❌ (só no web)
+API_INTERNAL_URL     ❌ (só no web)
+NEXT_PUBLIC_API_URL  ❌ (só no web)
+POSTGRES_*           ❌ (só no Postgres)
+API_PORT             ❌ (use PORT=3001)
+```
 
 ### Teste
 
