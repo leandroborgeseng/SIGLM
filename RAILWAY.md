@@ -51,7 +51,7 @@ PORT=3001
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 JWT_SECRET=1HOYyqtuN4GUzgu6STch7yvP//i8VUmYW3b/X/IrLrHQdHI88QW/gWEDXu9aHfsx
 JWT_REFRESH_SECRET=CsD5+oSJFVUZryJg7BlMW5OG2patCLyRPPIbj0nrZK2tO/vbFrpodC6e48VKXZtX
-CORS_ORIGIN=https://modest-mindfulness-production-8488.up.railway.app
+CORS_ORIGIN=https://siglm.up.railway.app
 RUN_SEED=false
 ```
 
@@ -61,7 +61,7 @@ RUN_SEED=false
 | `DATABASE_URL` | ✅ | Add Reference → Postgres |
 | `JWT_SECRET` | ✅ | Chave longa aleatória |
 | `JWT_REFRESH_SECRET` | ✅ | Outra chave longa |
-| `CORS_ORIGIN` | ✅ | URL exata do **web** (sem `/` no final) |
+| `CORS_ORIGIN` | ✅ | `https://siglm.up.railway.app` — só domínio, sem `/legislacao` |
 | `RUN_SEED` | ⚠️ | `true` só no **primeiro** deploy; depois `false` |
 
 ### O que NÃO colocar no siglm-backend
@@ -96,7 +96,7 @@ GET https://SEU-DOMINIO-BACKEND/api/health
 ### Settings → Networking
 
 - **Generate Domain**  
-  Ex.: `https://modest-mindfulness-production-8488.up.railway.app`
+  Ex.: `https://siglm.up.railway.app`
 
 ### Variables (Raw Editor)
 
@@ -153,7 +153,7 @@ JWT_*                 ❌
 
 ## 6. Login admin
 
-- URL: `https://modest-mindfulness-production-8488.up.railway.app/admin/login`
+- URL: `https://siglm.up.railway.app/admin/login`
 - E-mail: `admin@franca.sp.gov.br`
 - Senha: `admin123` *(altere em produção)*
 
