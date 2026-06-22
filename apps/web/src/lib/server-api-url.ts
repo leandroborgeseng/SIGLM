@@ -9,17 +9,12 @@ function fixRailwayInternalUrl(url: string): string {
     u = u.replace(/^https:\/\//, 'http://');
   }
 
-  // http://siglm.railway.internal:/api  — porta vazia após ":"
   u = u.replace(
     /\.railway\.internal:\//,
     `.railway.internal:${DEFAULT_INTERNAL_PORT}/`,
   );
 
-  // http://siglm.railway.internal/api — sem porta
-  if (
-    u.includes('.railway.internal') &&
-    !/\.railway\.internal:\d+/.test(u)
-  ) {
+  if (u.includes('.railway.internal') && !/\.railway\.internal:\d+/.test(u)) {
     u = u.replace(
       /\.railway\.internal/,
       `.railway.internal:${DEFAULT_INTERNAL_PORT}`,
@@ -29,13 +24,24 @@ function fixRailwayInternalUrl(url: string): string {
   return u;
 }
 
-/** URL da API para SSR e proxy — prefere rede privada (sem egress no Railway). */
+/** Candidatos para o proxy alcançar a API (interno primeiro, público como fallback). */
+export function getUpstreamApiUrls(): string[] {
+  const urls: string[] = [];
+
+  if (process.env.API_INTERNAL_URL) {
+    urls.push(fixRailwayInternalUrl(process.env.API_INTERNAL_URL));
+  }
+  if (process.env.API_URL) {
+    urls.push(process.env.API_URL.replace(/\/$/, ''));
+  }
+  if (process.env.NEXT_PUBLIC_API_URL && !urls.includes(process.env.NEXT_PUBLIC_API_URL)) {
+    urls.push(process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, ''));
+  }
+
+  return urls.length > 0 ? urls : [FALLBACK];
+}
+
+/** @deprecated Use getUpstreamApiUrls no proxy ou loopback no SSR. */
 export function getServerApiUrl(): string {
-  const internal = process.env.API_INTERNAL_URL;
-  if (internal) return fixRailwayInternalUrl(internal);
-
-  const pub = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-  if (pub) return pub.replace(/\/$/, '');
-
-  return FALLBACK;
+  return getUpstreamApiUrls()[0];
 }

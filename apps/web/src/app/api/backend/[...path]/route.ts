@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerApiUrl } from '@/lib/server-api-url';
+import { getUpstreamApiUrls } from '@/lib/server-api-url';
 
 async function proxy(req: NextRequest, path: string[]) {
-  const upstream = `${getServerApiUrl()}/${path.join('/')}${req.nextUrl.search}`;
+  const suffix = `${path.join('/')}${req.nextUrl.search}`;
 
   const headers = new Headers();
   const auth = req.headers.get('authorization');
@@ -19,23 +19,32 @@ async function proxy(req: NextRequest, path: string[]) {
     init.body = await req.arrayBuffer();
   }
 
-  let res: Response;
-  try {
-    res = await fetch(upstream, init);
-  } catch {
-    return NextResponse.json(
-      { message: `API indisponível (${getServerApiUrl()})` },
-      { status: 502 },
-    );
+  const candidates = getUpstreamApiUrls();
+  let lastError: unknown;
+
+  for (const base of candidates) {
+    const upstream = `${base}/${suffix}`;
+    try {
+      const res = await fetch(upstream, init);
+      const outHeaders = new Headers();
+      const ct = res.headers.get('content-type');
+      if (ct) outHeaders.set('content-type', ct);
+      const cd = res.headers.get('content-disposition');
+      if (cd) outHeaders.set('content-disposition', cd);
+      return new NextResponse(res.body, { status: res.status, headers: outHeaders });
+    } catch (err) {
+      lastError = err;
+      console.warn(`[proxy] falhou ${upstream}:`, err);
+    }
   }
 
-  const outHeaders = new Headers();
-  const ct = res.headers.get('content-type');
-  if (ct) outHeaders.set('content-type', ct);
-  const cd = res.headers.get('content-disposition');
-  if (cd) outHeaders.set('content-disposition', cd);
-
-  return new NextResponse(res.body, { status: res.status, headers: outHeaders });
+  return NextResponse.json(
+    {
+      message: `API indisponível. Tentou: ${candidates.join(', ')}`,
+      error: lastError instanceof Error ? lastError.message : 'fetch failed',
+    },
+    { status: 502 },
+  );
 }
 
 type Ctx = { params: Promise<{ path: string[] }> };

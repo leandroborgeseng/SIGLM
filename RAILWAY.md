@@ -89,16 +89,17 @@ GET https://SEU-DOMINIO-BACKEND/api/health
 ```env
 NODE_ENV=production
 API_INTERNAL_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:3001/api
+API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api
 ```
 
-> **Use `:3001` fixo** — `${{backend.PORT}}` não funciona como referência entre serviços no Railway (fica vazio → `siglm.railway.internal:/api`).
+> `API_INTERNAL_URL` tenta rede privada (sem egress). `API_URL` é **fallback** se a privada falhar.
 >
-> O nome do serviço (`backend`) deve ser o **nome exato** do serviço da API no Railway. Se for `siglm`, use `${{siglm.RAILWAY_PRIVATE_DOMAIN}}`.
+> O nome do serviço (`backend`) deve ser o **nome exato** no Railway. Se for `siglm`, use `${{siglm.*}}`.
 
 ### O que NÃO colocar no web
 
 ```env
-API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api   ❌ egress
+API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api   ⚠️ fallback (pode gerar aviso egress)
 NEXT_PUBLIC_API_URL                                     ❌
 DATABASE_URL                                            ❌
 ```
