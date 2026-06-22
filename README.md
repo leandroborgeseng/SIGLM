@@ -126,7 +126,6 @@ Todas as etapas do MVP foram concluídas:
 ### Melhorias futuras
 
 - Fila Bull/Redis dedicada para OCR em alta escala (opcional `REDIS_URL`)
-- Assets oficiais PNG do handoff (`franca-mark.png`, lockup)
 
 ## Deploy (Railway / Coolify)
 

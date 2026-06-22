@@ -21,8 +21,12 @@ const serif = IBM_Plex_Serif({
 });
 
 export const metadata: Metadata = {
-  title: 'LeisMunicipais — Portal de Legislação Municipal',
-  description: 'Prefeitura de Franca/SP',
+  title: 'Portal de Legislação — Prefeitura de Franca/SP',
+  description: 'Consulta e gestão de atos normativos municipais — Prefeitura Municipal de Franca/SP',
+  icons: {
+    icon: '/brand/franca-mark-icon.png',
+    apple: '/brand/franca-mark.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

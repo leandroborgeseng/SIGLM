@@ -57,11 +57,11 @@ export function AdminSidebar() {
   return (
     <>
       <aside className="hidden w-[264px] shrink-0 flex-col border-r border-line bg-surface lg:flex">
-        <div className="flex h-[60px] items-center gap-3 border-b border-line px-5">
-          <FrancaMark size={36} />
-          <div>
-            <div className="text-[13px] font-semibold text-ink">LeisMunicipais</div>
-            <div className="text-[11px] text-ink-3">Painel administrativo</div>
+        <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
+          <FrancaMark size={34} />
+          <div className="leading-tight">
+            <div className="text-[16px] font-bold tracking-tight text-ink">Legislação</div>
+            <div className="text-[10.5px] font-medium text-ink-3">Painel administrativo</div>
           </div>
         </div>
         <nav className="flex-1 overflow-y-auto p-3" aria-label="Menu administrativo">

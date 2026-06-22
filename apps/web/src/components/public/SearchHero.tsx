@@ -26,10 +26,13 @@ export function SearchHero() {
   return (
     <section id="busca" className="hero-gradient scroll-mt-16 px-4 py-12 sm:px-6 sm:py-16">
       <div className="mx-auto max-w-3xl text-center">
-        <p className="text-kicker mb-2 text-white/80">LeisMunicipais</p>
-        <h1 className="mb-6 text-[28px] font-bold tracking-tight text-white sm:text-[32px]">
-          Consulte a legislação municipal
+        <p className="text-kicker mb-3.5 text-white/80">Legislação Municipal Consolidada</p>
+        <h1 className="mb-3.5 text-[28px] font-bold leading-[1.08] tracking-tight text-white sm:text-[36px]">
+          Consulte leis, decretos e atos normativos de Franca
         </h1>
+        <p className="mb-7 text-[16px] leading-relaxed text-white/90">
+          Busque por número, ano, assunto ou qualquer palavra do texto da norma.
+        </p>
         <form
           onSubmit={(e) => {
             e.preventDefault();

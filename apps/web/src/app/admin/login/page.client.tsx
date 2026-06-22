@@ -39,30 +39,34 @@ export default function AdminLoginPage() {
     <div className="flex min-h-dvh">
       <div className="hero-gradient hidden flex-1 flex-col justify-between p-12 lg:flex">
         <div className="flex items-center gap-3">
-          <FrancaMark size={44} className="rounded-[12px]" />
-          <span className="text-[18px] font-semibold text-white">LeisMunicipais</span>
+          <FrancaMark size={46} shadow priority />
+          <div className="leading-tight">
+            <div className="text-[18px] font-bold tracking-tight text-white">Portal de Legislação</div>
+            <div className="text-[12px] text-white/80">Painel administrativo</div>
+          </div>
         </div>
         <div>
-          <h1 className="mb-4 max-w-md text-[32px] font-bold leading-tight text-white">
-            Gestão da legislação municipal de Franca/SP
+          <p className="text-kicker mb-4 text-white/80">Gestão legislativa municipal</p>
+          <h1 className="mb-3.5 max-w-md text-[34px] font-bold leading-[1.15] tracking-tight text-white">
+            Cadastre, importe e consolide as normas do Município.
           </h1>
-          <p className="max-w-sm text-[15px] leading-relaxed text-white/80">
-            Cadastre, importe, revise e publique atos normativos com rastreabilidade completa.
+          <p className="max-w-sm text-[15px] leading-relaxed text-white/90">
+            Versionamento completo, rastreabilidade e revisão humana antes da publicação.
           </p>
         </div>
-        <p className="text-[12px] text-white/50">Prefeitura Municipal de Franca · SP</p>
+        <p className="text-[12px] text-white/70">Prefeitura Municipal de Franca/SP</p>
       </div>
 
       <div className="flex flex-1 items-center justify-center bg-canvas p-6">
         <div className="w-full max-w-md rounded-[14px] border border-line bg-surface p-8 shadow-md">
           <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <FrancaMark size={40} />
+            <FrancaMark size={40} priority />
             <div>
-              <div className="text-[14px] font-semibold text-ink">LeisMunicipais</div>
-              <div className="text-[12px] text-ink-3">Prefeitura de Franca/SP</div>
+              <div className="text-[14px] font-semibold text-ink">Portal de Legislação</div>
+              <div className="text-[12px] text-ink-3">Prefeitura Municipal de Franca/SP</div>
             </div>
           </div>
-          <p className="text-kicker mb-1">Área restrita</p>
+          <p className="text-kicker mb-1">Acesso restrito</p>
           <h2 className="text-page-title mb-6">Entrar no painel</h2>
 
           {sessaoExpirada && (
