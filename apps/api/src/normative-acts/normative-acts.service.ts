@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AddUnitDto, CreateActDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
 import { buildActSlug, formatActCode, parseSlug } from './normative-acts.utils';
+import { defaultIdentificacao, validateUnitsHierarchy } from './unit-hierarchy.utils';
 import {
   buildFtsFilterSql,
   normalizeSearchTerm,
@@ -543,6 +544,7 @@ export class NormativeActsService {
               ordem: input.ordem,
               identificacao: input.identificacao,
               tipoUnidade: input.tipoUnidade,
+              parentUnitId: input.parentUnitId ?? null,
             },
           });
         } else {
@@ -553,6 +555,7 @@ export class NormativeActsService {
               identificacao: input.identificacao,
               texto: input.texto,
               ordem: input.ordem,
+              parentUnitId: input.parentUnitId ?? null,
               status: UnitStatus.vigente,
               origemActId: actId,
             },
@@ -574,25 +577,52 @@ export class NormativeActsService {
 
   async addUnit(actId: string, dto: AddUnitDto) {
     const act = await this.ensureAct(actId);
-    const maxOrdem = await this.prisma.normativeUnit.aggregate({
-      where: { actId },
-      _max: { ordem: true },
-    });
-    const ordem = (maxOrdem._max.ordem ?? -1) + 1;
+    const existing = [...act.units].sort((a, b) => a.ordem - b.ordem);
 
-    const unit = await this.prisma.normativeUnit.create({
-      data: {
-        actId,
-        tipoUnidade: dto.tipoUnidade,
-        identificacao: dto.identificacao ?? this.defaultIdentificacao(dto.tipoUnidade, ordem),
-        texto: dto.texto ?? '',
-        ordem,
-        status: UnitStatus.vigente,
-        origemActId: actId,
-      },
+    if (dto.parentUnitId) {
+      const parent = existing.find((u) => u.id === dto.parentUnitId);
+      if (!parent) throw new BadRequestException('Dispositivo pai não encontrado');
+    }
+
+    const insertOrdem = this.nextOrdemAfterParent(existing, dto.parentUnitId ?? null);
+
+    await this.prisma.$transaction(async (tx) => {
+      const toShift = await tx.normativeUnit.findMany({
+        where: { actId, ordem: { gte: insertOrdem } },
+        orderBy: { ordem: 'desc' },
+      });
+      for (const u of toShift) {
+        await tx.normativeUnit.update({
+          where: { id: u.id },
+          data: { ordem: u.ordem + 1 },
+        });
+      }
+
+      const unit = await tx.normativeUnit.create({
+        data: {
+          actId,
+          tipoUnidade: dto.tipoUnidade,
+          identificacao:
+            dto.identificacao ??
+            defaultIdentificacao(dto.tipoUnidade, existing, dto.parentUnitId ?? null),
+          texto: dto.texto ?? '',
+          ordem: insertOrdem,
+          parentUnitId: dto.parentUnitId ?? null,
+          status: UnitStatus.vigente,
+          origemActId: actId,
+        },
+      });
+
+      await tx.normativeVersion.create({
+        data: {
+          unitId: unit.id,
+          texto: unit.texto,
+          validoDe: act.dataAto ?? new Date(),
+          origemActId: actId,
+        },
+      });
     });
 
-    await this.createVersionForUnit(unit.id, unit.texto, actId, act.dataAto);
     return this.getAdminById(actId);
   }
 
@@ -632,13 +662,46 @@ export class NormativeActsService {
     return this.getPublicBySlug(slugPath);
   }
 
-  validateHierarchy(units: { ordem: number; tipoUnidade: UnitType }[]): boolean {
-    if (units.length === 0) return true;
-    const sorted = [...units].sort((a, b) => a.ordem - b.ordem);
-    for (let i = 0; i < sorted.length; i++) {
-      if (sorted[i].ordem !== i) return false;
+  validateHierarchy(
+    units: { id: string; ordem: number; tipoUnidade: UnitType; parentUnitId?: string | null }[],
+  ): boolean {
+    return validateUnitsHierarchy(units);
+  }
+
+  private nextOrdemAfterParent(
+    units: { id: string; ordem: number; parentUnitId?: string | null }[],
+    parentUnitId: string | null,
+  ): number {
+    if (!parentUnitId) return units.length;
+
+    const parentIndex = units.findIndex((u) => u.id === parentUnitId);
+    if (parentIndex < 0) return units.length;
+
+    const subtreeIds = this.collectSubtreeIds(parentUnitId, units);
+    const lastIndex = Math.max(
+      ...units
+        .map((u, i) => (subtreeIds.has(u.id) ? i : -1))
+        .filter((i) => i >= 0),
+    );
+    return lastIndex + 1;
+  }
+
+  private collectSubtreeIds(
+    rootId: string,
+    units: { id: string; parentUnitId?: string | null }[],
+  ): Set<string> {
+    const ids = new Set<string>([rootId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const u of units) {
+        if (u.parentUnitId && ids.has(u.parentUnitId) && !ids.has(u.id)) {
+          ids.add(u.id);
+          changed = true;
+        }
+      }
     }
-    return true;
+    return ids;
   }
 
   private async ensureAct(id: string) {
@@ -648,14 +711,6 @@ export class NormativeActsService {
     });
     if (!act) throw new NotFoundException('Ato normativo não encontrado');
     return act;
-  }
-
-  private defaultIdentificacao(tipo: UnitType, ordem: number): string | undefined {
-    if (tipo === UnitType.artigo) {
-      const n = ordem > 0 ? ordem : 1;
-      return `Art. ${n}º`;
-    }
-    return undefined;
   }
 
   async restoreUnitVersion(actId: string, unitId: string, versionId: string) {

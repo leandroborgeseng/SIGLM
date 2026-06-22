@@ -112,6 +112,10 @@ export class UnitInputDto {
   @IsInt()
   @Min(0)
   ordem!: number;
+
+  @IsOptional()
+  @IsString()
+  parentUnitId?: string | null;
 }
 
 export class SaveUnitsDto {
@@ -132,4 +136,8 @@ export class AddUnitDto {
   @IsOptional()
   @IsString()
   texto?: string;
+
+  @IsOptional()
+  @IsString()
+  parentUnitId?: string | null;
 }

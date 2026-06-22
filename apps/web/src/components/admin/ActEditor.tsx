@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -11,6 +11,7 @@ import {
   GripVertical,
   Plus,
 } from 'lucide-react';
+import { AddUnitDialog } from '@/components/admin/AddUnitDialog';
 import { AdminTopbar } from '@/components/admin/AdminShell';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -27,12 +28,32 @@ import {
 } from '@/lib/admin-api';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 import { ACT_TYPE_LABELS, cn } from '@/lib/format';
-import type { ActDetail, NormativeUnit } from '@/lib/types';
+import type { ActDetail, NormativeUnit, UnitType } from '@/lib/types';
+import {
+  dragDropBlock,
+  getValidParents,
+  moveUnitBlock,
+  parentLabel,
+  unitIndentClass,
+  UNIT_TYPE_LABELS,
+  validateUnitsHierarchy,
+} from '@/lib/unit-hierarchy';
 
 interface EditorAct extends ActDetail {
   statusPublicacao?: string;
   hierarchyValid?: boolean;
   observacoesInternas?: string | null;
+}
+
+function unitsPayload(units: NormativeUnit[]): UnitPayload[] {
+  return units.map((u, i) => ({
+    id: u.id,
+    tipoUnidade: u.tipoUnidade,
+    identificacao: u.identificacao,
+    texto: u.texto,
+    ordem: i,
+    parentUnitId: u.parentUnitId ?? null,
+  }));
 }
 
 export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
@@ -46,29 +67,25 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const [orgao, setOrgao] = useState(initialAct.orgaoOrigem ?? '');
   const [saving, setSaving] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
-  const hierarchyValid = units.every((u, i) => u.ordem === i);
-
-  const normalizeOrdem = useCallback((list: NormativeUnit[]) => {
-    return list.map((u, i) => ({ ...u, ordem: i }));
-  }, []);
+  const hierarchyValid = useMemo(() => validateUnitsHierarchy(units), [units]);
 
   const moveUnit = (index: number, direction: -1 | 1) => {
-    const next = [...units];
-    const target = index + direction;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    setUnits(normalizeOrdem(next));
+    const next = moveUnitBlock(units, index, direction);
+    if (next !== units) setUnits(next);
+  };
+
+  const canMove = (index: number, direction: -1 | 1) => {
+    const next = moveUnitBlock(units, index, direction);
+    return next !== units;
   };
 
   const onDragStart = (index: number) => setDragIndex(index);
 
   const onDrop = (index: number) => {
     if (dragIndex === null || dragIndex === index) return;
-    const next = [...units];
-    const [removed] = next.splice(dragIndex, 1);
-    next.splice(index, 0, removed);
-    setUnits(normalizeOrdem(next));
+    setUnits(dragDropBlock(units, dragIndex, index));
     setDragIndex(null);
   };
 
@@ -76,12 +93,23 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, texto } : u)));
   };
 
-  const handleAddUnit = async () => {
+  const updateUnitParent = (id: string, parentUnitId: string | null) => {
+    setUnits((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, parentUnitId: parentUnitId || null } : u)),
+    );
+  };
+
+  const handleAddUnit = async (payload: {
+    tipoUnidade: UnitType;
+    identificacao?: string;
+    parentUnitId?: string | null;
+  }) => {
     try {
       const updated = await addUnit(act.id, {
-        tipoUnidade: 'artigo',
-        identificacao: `Art. ${units.filter((u) => u.tipoUnidade === 'artigo').length + 1}º`,
+        tipoUnidade: payload.tipoUnidade,
+        identificacao: payload.identificacao,
         texto: '',
+        parentUnitId: payload.parentUnitId ?? null,
       });
       setAct(updated);
       setUnits(updated.units);
@@ -91,20 +119,18 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     }
   };
 
+  const persistUnits = useCallback(async () => {
+    const updated = await saveUnits(act.id, unitsPayload(units));
+    setAct(updated);
+    setUnits(updated.units);
+    return updated;
+  }, [act.id, units]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
       await updateAct(act.id, { ementa, assunto, orgaoOrigem: orgao });
-      const payload: UnitPayload[] = units.map((u, i) => ({
-        id: u.id,
-        tipoUnidade: u.tipoUnidade,
-        identificacao: u.identificacao,
-        texto: u.texto,
-        ordem: i,
-      }));
-      const updated = await saveUnits(act.id, payload);
-      setAct(updated);
-      setUnits(updated.units);
+      await persistUnits();
       toast('Rascunho salvo', 'ok');
       router.refresh();
     } catch (e) {
@@ -118,14 +144,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setSaving(true);
     try {
       await updateAct(act.id, { ementa, assunto, orgaoOrigem: orgao });
-      const payload: UnitPayload[] = units.map((u, i) => ({
-        id: u.id,
-        tipoUnidade: u.tipoUnidade,
-        identificacao: u.identificacao,
-        texto: u.texto,
-        ordem: i,
-      }));
-      await saveUnits(act.id, payload);
+      await persistUnits();
       const updated = await submitForReview(act.id);
       setAct(updated);
       toast('Enviado para revisão', 'ok');
@@ -141,14 +160,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setSaving(true);
     try {
       await updateAct(act.id, { ementa, assunto, orgaoOrigem: orgao });
-      const payload: UnitPayload[] = units.map((u, i) => ({
-        id: u.id,
-        tipoUnidade: u.tipoUnidade,
-        identificacao: u.identificacao,
-        texto: u.texto,
-        ordem: i,
-      }));
-      await saveUnits(act.id, payload);
+      await persistUnits();
       const updated = await publishAct(act.id);
       setAct(updated);
       toast('Ato publicado no portal', 'ok');
@@ -268,97 +280,150 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               ) : (
                 <AlertCircle className="h-4 w-4" />
               )}
-              {hierarchyValid ? 'Hierarquia válida' : 'Revise a ordem dos dispositivos'}
+              {hierarchyValid ? 'Hierarquia válida' : 'Revise ordem e vínculos dos dispositivos'}
             </div>
           </div>
 
           <div className="space-y-2">
-            {units.map((unit, index) => (
-              <div
-                key={unit.id}
-                draggable
-                onDragStart={() => onDragStart(index)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => onDrop(index)}
-                className={cn(
-                  'flex items-start gap-2 rounded-[10px] border border-line-2 bg-surface-2 p-3 transition',
-                  dragIndex === index && 'opacity-50',
-                )}
-              >
-                <GripVertical className="mt-1 h-4 w-4 shrink-0 cursor-grab text-ink-4" />
-                <div className="min-w-0 flex-1 space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[12px] font-semibold text-brand">
-                      {unit.identificacao ?? unit.tipoUnidade}
-                    </span>
-                    <Badge
-                      variant={
-                        unit.status === 'vigente'
-                          ? 'ok'
-                          : unit.status === 'revogada'
-                            ? 'danger'
-                            : 'warn'
-                      }
-                    >
-                      {unit.status}
-                    </Badge>
-                  </div>
-                  <textarea
-                    value={unit.texto}
-                    onChange={(e) => updateUnitText(unit.id, e.target.value)}
-                    rows={3}
-                    className="w-full rounded-[8px] border border-line bg-surface px-3 py-2 text-[13px] focus-ring"
-                  />
-                  {can('acts:write') && unit.versoes.length > 1 && (
-                    <Select
-                      defaultValue=""
-                      onChange={(e) => {
-                        const versionId = e.target.value;
-                        if (versionId) handleRestoreVersion(unit.id, versionId);
-                        e.target.value = '';
-                      }}
-                      className="text-[12px]"
-                    >
-                      <option value="">Restaurar versão anterior…</option>
-                      {unit.versoes.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {new Date(v.validoDe).toLocaleDateString('pt-BR')}
-                          {v.validoAte ? ` — ${new Date(v.validoAte).toLocaleDateString('pt-BR')}` : ' — atual'}
-                        </option>
-                      ))}
-                    </Select>
+            {units.map((unit, index) => {
+              const validParents = getValidParents(unit.tipoUnidade, units).filter(
+                (p) => p.id !== unit.id,
+              );
+
+              return (
+                <div
+                  key={unit.id}
+                  draggable
+                  onDragStart={() => onDragStart(index)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => onDrop(index)}
+                  className={cn(
+                    'flex items-start gap-2 rounded-[10px] border border-line-2 bg-surface-2 p-3 transition',
+                    unitIndentClass(unit.tipoUnidade),
+                    dragIndex === index && 'opacity-50',
                   )}
+                >
+                  <GripVertical className="mt-1 h-4 w-4 shrink-0 cursor-grab text-ink-4" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-[12px] font-semibold text-brand">
+                        {unit.identificacao ?? UNIT_TYPE_LABELS[unit.tipoUnidade]}
+                      </span>
+                      <Badge variant="neutral" className="text-[10px]">
+                        {UNIT_TYPE_LABELS[unit.tipoUnidade]}
+                      </Badge>
+                      <Badge
+                        variant={
+                          unit.status === 'vigente'
+                            ? 'ok'
+                            : unit.status === 'revogada'
+                              ? 'danger'
+                              : 'warn'
+                        }
+                      >
+                        {unit.status}
+                      </Badge>
+                      {unit.parentUnitId && (
+                        <span className="text-[11px] text-ink-4">
+                          ↳ {parentLabel(units, unit.parentUnitId)}
+                        </span>
+                      )}
+                    </div>
+
+                    {can('acts:write') && validParents.length > 0 && (
+                      <div>
+                        <label className="mb-1 block text-[11px] text-ink-4">Vincular a</label>
+                        <Select
+                          value={unit.parentUnitId ?? ''}
+                          onChange={(e) =>
+                            updateUnitParent(unit.id, e.target.value || null)
+                          }
+                          className="text-[12px]"
+                        >
+                          <option value="">Nenhum (nível superior)</option>
+                          {validParents.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.identificacao ?? UNIT_TYPE_LABELS[p.tipoUnidade]} (
+                              {UNIT_TYPE_LABELS[p.tipoUnidade]})
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
+
+                    <textarea
+                      value={unit.texto}
+                      onChange={(e) => updateUnitText(unit.id, e.target.value)}
+                      rows={unit.tipoUnidade === 'artigo' ? 3 : 2}
+                      className="w-full rounded-[8px] border border-line bg-surface px-3 py-2 text-[13px] focus-ring"
+                    />
+                    {can('acts:write') && unit.versoes.length > 1 && (
+                      <Select
+                        defaultValue=""
+                        onChange={(e) => {
+                          const versionId = e.target.value;
+                          if (versionId) handleRestoreVersion(unit.id, versionId);
+                          e.target.value = '';
+                        }}
+                        className="text-[12px]"
+                      >
+                        <option value="">Restaurar versão anterior…</option>
+                        {unit.versoes.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {new Date(v.validoDe).toLocaleDateString('pt-BR')}
+                            {v.validoAte
+                              ? ` — ${new Date(v.validoAte).toLocaleDateString('pt-BR')}`
+                              : ' — atual'}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => moveUnit(index, -1)}
+                      disabled={!canMove(index, -1)}
+                      className="touch-target rounded p-1.5 text-ink-4 hover:bg-surface hover:text-brand disabled:opacity-30"
+                      aria-label="Mover para cima"
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveUnit(index, 1)}
+                      disabled={!canMove(index, 1)}
+                      className="touch-target rounded p-1.5 text-ink-4 hover:bg-surface hover:text-brand disabled:opacity-30"
+                      aria-label="Mover para baixo"
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 flex-col gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => moveUnit(index, -1)}
-                    disabled={index === 0}
-                    className="touch-target rounded p-1.5 text-ink-4 hover:bg-surface hover:text-brand disabled:opacity-30"
-                    aria-label="Mover para cima"
-                  >
-                    <ArrowUp className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveUnit(index, 1)}
-                    disabled={index === units.length - 1}
-                    className="touch-target rounded p-1.5 text-ink-4 hover:bg-surface hover:text-brand disabled:opacity-30"
-                    aria-label="Mover para baixo"
-                  >
-                    <ArrowDown className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          <Button variant="tonal" size="sm" className="mt-4" onClick={handleAddUnit}>
-            <Plus className="h-4 w-4" />
-            Adicionar dispositivo
-          </Button>
+          {can('acts:write') && act.statusPublicacao !== 'publicado' && (
+            <Button
+              variant="tonal"
+              size="sm"
+              className="mt-4"
+              onClick={() => setAddDialogOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Adicionar dispositivo
+            </Button>
+          )}
         </section>
       </div>
+
+      <AddUnitDialog
+        open={addDialogOpen}
+        units={units}
+        onClose={() => setAddDialogOpen(false)}
+        onConfirm={handleAddUnit}
+      />
     </>
   );
 }

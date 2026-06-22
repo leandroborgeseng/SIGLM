@@ -54,6 +54,7 @@ export interface UnitPayload {
   identificacao?: string | null;
   texto: string;
   ordem: number;
+  parentUnitId?: string | null;
 }
 
 export function createAct(payload: CreateActPayload, token?: string) {
@@ -79,7 +80,12 @@ export function saveUnits(id: string, units: UnitPayload[], token?: string) {
 
 export function addUnit(
   id: string,
-  payload: { tipoUnidade: string; identificacao?: string; texto?: string },
+  payload: {
+    tipoUnidade: string;
+    identificacao?: string;
+    texto?: string;
+    parentUnitId?: string | null;
+  },
   token?: string,
 ) {
   return adminFetch<ActDetail>(`/admin/acts/${id}/units`, {
@@ -175,6 +181,14 @@ export interface ImportDetail {
     blocos: { tag: string; tipo: string; texto: string; confianca: number; ordem: number }[];
     mediaConfianca: number;
     ocrAprovado?: boolean;
+    metadados?: {
+      tipo: string | null;
+      numero: number | null;
+      ano: number | null;
+      ementa: string | null;
+      tituloCompleto: string | null;
+      confianca: number;
+    };
   } | null;
   actId: string | null;
   ocrResults: {

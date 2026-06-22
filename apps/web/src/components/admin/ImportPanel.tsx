@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import { AdminTopbar } from '@/components/admin/AdminShell';
 import { Badge } from '@/components/ui/Badge';
@@ -19,6 +19,8 @@ import {
   type ImportDetail,
 } from '@/lib/admin-api';
 import { ACT_TYPE_LABELS, ACT_TYPES } from '@/lib/format';
+import type { ActType } from '@/lib/types';
+import { UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
 
 const STEPS = ['Upload', 'Conferência', 'Publicação'];
 
@@ -35,14 +37,43 @@ export function ImportPanel() {
   const [confirming, setConfirming] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [meta, setMeta] = useState({ tipo: 'lei', numero: '', ano: String(new Date().getFullYear()), ementa: '' });
+  const metaAppliedFor = useRef<string | null>(null);
+
+  const applyDetectedMeta = useCallback((data: ImportDetail) => {
+    const detected = data.estruturaDetectada?.metadados;
+    const ementaBlock = data.estruturaDetectada?.blocos.find((b) => b.tipo === 'ementa');
+    const tipo =
+      detected?.tipo && ACT_TYPES.includes(detected.tipo as ActType)
+        ? detected.tipo
+        : 'lei';
+
+    setMeta({
+      tipo,
+      numero: detected?.numero != null ? String(detected.numero) : '',
+      ano:
+        detected?.ano != null
+          ? String(detected.ano)
+          : String(new Date().getFullYear()),
+      ementa: detected?.ementa ?? ementaBlock?.texto ?? '',
+    });
+  }, []);
 
   const load = useCallback(async (id: string) => {
     const data = await getImport(id);
     setImp(data);
-    const ementaBlock = data.estruturaDetectada?.blocos.find((b) => b.tipo === 'ementa');
-    if (ementaBlock) setMeta((m) => ({ ...m, ementa: ementaBlock.texto }));
     return data;
   }, []);
+
+  useEffect(() => {
+    metaAppliedFor.current = null;
+  }, [importId]);
+
+  useEffect(() => {
+    if (!imp?.estruturaDetectada) return;
+    if (metaAppliedFor.current === imp.id) return;
+    metaAppliedFor.current = imp.id;
+    applyDetectedMeta(imp);
+  }, [imp?.id, imp?.estruturaDetectada, applyDetectedMeta]);
 
   useEffect(() => {
     if (importId) load(importId).catch(() => toast('Importação não encontrada', 'danger'));
@@ -115,6 +146,7 @@ export function ImportPanel() {
   const handleReprocess = async () => {
     if (!imp) return;
     setReprocessing(true);
+    metaAppliedFor.current = null;
     try {
       const data = await reprocessImport(imp.id);
       setImp(data);
@@ -241,6 +273,19 @@ export function ImportPanel() {
             </div>
 
             <div className="mb-6 grid gap-4 rounded-[14px] border border-line bg-surface p-5 sm:grid-cols-4">
+              {imp.estruturaDetectada?.metadados?.tituloCompleto && (
+                <p className="sm:col-span-4 text-[12px] text-ink-3">
+                  Título identificado:{' '}
+                  <span className="font-semibold text-ink">
+                    {imp.estruturaDetectada.metadados.tituloCompleto}
+                  </span>
+                  {imp.estruturaDetectada.metadados.confianca > 0 && (
+                    <span className="ml-2 font-mono text-ink-4">
+                      ({imp.estruturaDetectada.metadados.confianca}% confiança)
+                    </span>
+                  )}
+                </p>
+              )}
               <div>
                 <label className="mb-1 block text-[12px] text-ink-3">Tipo</label>
                 <Select value={meta.tipo} onChange={(e) => setMeta({ ...meta, tipo: e.target.value })}>
@@ -303,12 +348,29 @@ export function ImportPanel() {
                     {imp.estruturaDetectada.blocos.map((item) => (
                       <li
                         key={`${item.tag}-${item.ordem}`}
-                        className={`flex items-center justify-between rounded-[10px] border px-3 py-2 ${
+                        className={`rounded-[10px] border px-3 py-2 ${
                           item.confianca < 80 ? 'border-warn-bd bg-warn-bg' : 'border-line-2 bg-surface-2'
                         }`}
                       >
-                        <span className="font-mono text-[13px]">{item.tag}</span>
-                        <span className="font-mono text-[12px] text-ink-3">{item.confianca}%</span>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[13px] font-semibold text-ink">
+                                {item.tag}
+                              </span>
+                              <Badge variant="info" className="text-[10px]">
+                                {UNIT_TYPE_LABELS[item.tipo as keyof typeof UNIT_TYPE_LABELS] ??
+                                  item.tipo}
+                              </Badge>
+                            </div>
+                            {item.texto && (
+                              <p className="mt-1 line-clamp-2 text-[12px] text-ink-3">{item.texto}</p>
+                            )}
+                          </div>
+                          <span className="shrink-0 font-mono text-[12px] text-ink-3">
+                            {item.confianca}%
+                          </span>
+                        </div>
                       </li>
                     ))}
                   </ul>

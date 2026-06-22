@@ -113,7 +113,8 @@ export class ImportService {
       return this.getImportDetail(importId);
     }
 
-    const estrutura = parseStructure(text, 96);
+    const arquivoOriginal = imp.arquivo.replace(/^\d+-/, '');
+    const estrutura = parseStructure(text, 96, arquivoOriginal);
     await this.prisma.import.update({
       where: { id: importId },
       data: {
@@ -246,7 +247,8 @@ export class ImportService {
       confianca: r.confianca as { linhas: { texto: string; confianca: number }[]; mediaPagina: number },
     }));
 
-    const estrutura = mergeOcrPages(pages);
+    const arquivoOriginal = imp.arquivo.replace(/^\d+-/, '');
+    const estrutura = mergeOcrPages(pages, arquivoOriginal);
     estrutura.ocrAprovado = true;
 
     await this.prisma.$transaction([
@@ -287,14 +289,29 @@ export class ImportService {
     }
 
     const estrutura = imp.estruturaDetectada as {
-      blocos: { tag: string; tipo: string; texto: string; ordem: number }[];
+      blocos: {
+        tag: string;
+        tipo: string;
+        texto: string;
+        ordem: number;
+        parentOrdem?: number | null;
+      }[];
+      metadados?: {
+        tipo?: string | null;
+        numero?: number | null;
+        ano?: number | null;
+        ementa?: string | null;
+      };
     };
 
     const ementaBlock = estrutura.blocos.find((b) => b.tipo === 'ementa');
-    const ementa = meta.ementa ?? ementaBlock?.texto ?? 'Ementa importada';
-    const ano = meta.ano ?? new Date().getFullYear();
-    const numero = meta.numero ?? (await this.nextNumero(meta.tipo ?? ActType.lei, ano));
-    const tipo = meta.tipo ?? ActType.lei;
+    const detected = estrutura.metadados;
+    const ementa =
+      meta.ementa ?? detected?.ementa ?? ementaBlock?.texto ?? 'Ementa importada';
+    const ano = meta.ano ?? detected?.ano ?? new Date().getFullYear();
+    const tipo = (meta.tipo ?? detected?.tipo ?? ActType.lei) as ActType;
+    const numero =
+      meta.numero ?? detected?.numero ?? (await this.nextNumero(tipo, ano));
 
     const act = await this.prisma.normativeAct.create({
       data: {
@@ -308,14 +325,34 @@ export class ImportService {
         units: {
           create: estrutura.blocos.map((b, i) => ({
             tipoUnidade: b.tipo as UnitType,
-            identificacao: b.tipo === 'artigo' ? b.tag : b.tipo === 'preambulo' ? null : b.tag,
+            identificacao:
+              ['artigo', 'paragrafo', 'inciso', 'alinea', 'item', 'titulo', 'capitulo', 'secao'].includes(
+                b.tipo,
+              )
+                ? b.tag
+                : b.tipo === 'preambulo'
+                  ? null
+                  : b.tag,
             texto: b.texto,
             ordem: i,
           })),
         },
       },
-      include: { units: true },
+      include: { units: { orderBy: { ordem: 'asc' } } },
     });
+
+    const ordemToId = new Map(act.units.map((u) => [u.ordem, u.id]));
+    for (const block of estrutura.blocos) {
+      if (block.parentOrdem == null) continue;
+      const unitId = ordemToId.get(block.ordem);
+      const parentId = ordemToId.get(block.parentOrdem);
+      if (unitId && parentId) {
+        await this.prisma.normativeUnit.update({
+          where: { id: unitId },
+          data: { parentUnitId: parentId },
+        });
+      }
+    }
 
     const importRecord = await this.prisma.import.findUnique({ where: { id: importId } });
     if (importRecord) {

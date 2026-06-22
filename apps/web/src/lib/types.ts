@@ -60,6 +60,7 @@ export interface NormativeUnit {
   texto: string;
   ordem: number;
   status: UnitStatus;
+  parentUnitId?: string | null;
   nota: string | null;
   versoes: NormativeVersion[];
 }

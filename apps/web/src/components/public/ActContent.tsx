@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Tabs } from '@/components/ui/Form';
 import { cn, formatDate } from '@/lib/format';
-import type { ActDetail, NormativeUnit } from '@/lib/types';
+import { unitIndentClass, UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
+import type { ActDetail, NormativeUnit, UnitType } from '@/lib/types';
 
 function noteVariant(nota: string | null): 'warn' | 'danger' | 'ok' | 'neutral' {
   if (!nota) return 'neutral';
@@ -13,6 +14,8 @@ function noteVariant(nota: string | null): 'warn' | 'danger' | 'ok' | 'neutral' 
   return 'warn';
 }
 
+const STRUCTURAL_TYPES: UnitType[] = ['titulo', 'capitulo', 'livro', 'secao', 'subsecao'];
+
 function UnitBlock({
   unit,
   mode,
@@ -20,9 +23,7 @@ function UnitBlock({
   unit: NormativeUnit;
   mode: 'consolidado' | 'original' | 'historico';
 }) {
-  const isStructural = ['titulo', 'capitulo', 'livro', 'secao', 'subsecao'].includes(
-    unit.tipoUnidade,
-  );
+  const isStructural = STRUCTURAL_TYPES.includes(unit.tipoUnidade);
   const isPreamble = unit.tipoUnidade === 'preambulo';
   const isRevoked = unit.status === 'revogada';
   const isIncluded = unit.status === 'incluida';
@@ -38,33 +39,60 @@ function UnitBlock({
 
   if (mode === 'historico') return null;
 
-  return (
-    <article
-      id={unit.identificacao?.replace(/\s+/g, '-').toLowerCase() ?? `unit-${unit.ordem}`}
-      className={cn('mb-6', isRevoked && mode === 'consolidado' && 'opacity-80')}
-    >
-      {isPreamble && (
-        <p className="legal-body mb-6 text-center italic text-ink-2">{texto}</p>
-      )}
-      {isStructural && (
-        <h3 className="legal-body mb-4 text-center text-[15px] font-semibold uppercase tracking-wide text-ink">
+  const indent = unitIndentClass(unit.tipoUnidade);
+  const anchorId =
+    unit.identificacao?.replace(/\s+/g, '-').toLowerCase() ?? `unit-${unit.ordem}`;
+
+  if (isPreamble) {
+    return (
+      <article id={anchorId} className="legal-body mb-6 text-center italic text-ink-2">
+        {texto}
+      </article>
+    );
+  }
+
+  if (isStructural) {
+    return (
+      <article id={anchorId} className={cn('mb-6', indent)}>
+        <h3 className="legal-body text-center text-[15px] font-semibold uppercase tracking-wide text-ink">
           {unit.identificacao && <span className="block">{unit.identificacao}</span>}
           {texto}
         </h3>
-      )}
-      {!isPreamble && !isStructural && unit.tipoUnidade === 'artigo' && (
-        <p className="legal-body text-ink">
-          <strong className={cn(isRevoked && mode === 'consolidado' && 'text-ink-4 line-through')}>
-            {unit.identificacao}
-          </strong>{' '}
-          <span className={cn(isRevoked && mode === 'consolidado' && 'text-ink-4 line-through')}>
-            {texto}
-          </span>
-        </p>
-      )}
-      {!isPreamble && !isStructural && unit.tipoUnidade !== 'artigo' && unit.tipoUnidade !== 'ementa' && (
-        <p className="legal-body pl-6 text-ink">{texto}</p>
-      )}
+        {mode === 'consolidado' && unit.nota && (
+          <div className="mt-2 text-center">
+            <Badge variant={noteVariant(unit.nota)}>{unit.nota}</Badge>
+          </div>
+        )}
+      </article>
+    );
+  }
+
+  if (unit.tipoUnidade === 'ementa') return null;
+
+  const showLabel = ['artigo', 'paragrafo', 'inciso', 'alinea', 'item'].includes(unit.tipoUnidade);
+  const label = unit.identificacao ?? UNIT_TYPE_LABELS[unit.tipoUnidade];
+
+  return (
+    <article
+      id={anchorId}
+      className={cn('mb-4', indent, isRevoked && mode === 'consolidado' && 'opacity-80')}
+    >
+      <p className="legal-body text-ink">
+        {showLabel && label && (
+          <strong
+            className={cn(
+              unit.tipoUnidade === 'artigo' && 'mr-1',
+              isRevoked && mode === 'consolidado' && 'text-ink-4 line-through',
+            )}
+          >
+            {unit.tipoUnidade === 'inciso' ? `${label} –` : label}
+          </strong>
+        )}
+        <span className={cn(isRevoked && mode === 'consolidado' && 'text-ink-4 line-through')}>
+          {showLabel && label ? ' ' : ''}
+          {texto}
+        </span>
+      </p>
       {mode === 'consolidado' && unit.nota && (
         <div className="mt-2">
           <Badge variant={noteVariant(unit.nota)}>{unit.nota}</Badge>
