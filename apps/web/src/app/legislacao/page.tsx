@@ -23,13 +23,24 @@ async function Results({
   searchParams: Promise<{ q?: string; tipo?: string; situacao?: string; ano?: string; page?: string }>;
 }) {
   const sp = await searchParams;
-  const data = await searchActs({
-    q: sp.q,
-    tipo: sp.tipo,
-    situacao: sp.situacao,
-    ano: sp.ano,
-    page: sp.page ? Number(sp.page) : 1,
-  });
+  let data;
+  try {
+    data = await searchActs({
+      q: sp.q,
+      tipo: sp.tipo,
+      situacao: sp.situacao,
+      ano: sp.ano,
+      page: sp.page ? Number(sp.page) : 1,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Erro ao buscar atos';
+    return (
+      <div className="rounded-[14px] border border-line bg-surface p-8 text-center">
+        <p className="text-page-title mb-2">Erro ao carregar resultados</p>
+        <p className="text-[13px] text-ink-3 font-mono">{msg}</p>
+      </div>
+    );
+  }
 
   if (data.items.length === 0) {
     return (

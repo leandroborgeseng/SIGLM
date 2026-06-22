@@ -8,7 +8,7 @@ if [ -z "$DATABASE_URL" ]; then
 fi
 
 echo "Aplicando migrations..."
-npx prisma migrate deploy
+../../node_modules/.bin/prisma migrate deploy
 
 if [ "$RUN_SEED" = "true" ]; then
   echo "Executando seed..."

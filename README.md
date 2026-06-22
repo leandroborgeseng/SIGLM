@@ -130,7 +130,7 @@ Dockerfiles em `apps/api/Dockerfile` e `apps/web/Dockerfile`. Stack completa:
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Guia passo a passo: [`DEPLOY.md`](DEPLOY.md) — GitHub, variáveis, Coolify Compose e Railway.
+Guia passo a passo: [`RAILWAY.md`](RAILWAY.md) (recomendado) ou [`DEPLOY.md`](DEPLOY.md) (Railway + Coolify).
 
 ## Design
 
