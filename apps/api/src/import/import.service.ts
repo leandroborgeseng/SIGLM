@@ -57,10 +57,14 @@ export class ImportService {
     try {
       await this.processImport(importId);
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro desconhecido';
       console.error(`[import] falhou ${importId}:`, err);
       await this.prisma.import.update({
         where: { id: importId },
-        data: { status: ImportStatus.erro },
+        data: {
+          status: ImportStatus.erro,
+          lib: `erro: ${message.slice(0, 240)}`,
+        },
       });
     }
   }
@@ -143,8 +147,12 @@ export class ImportService {
       data: {
         status: ImportStatus.processando,
         estruturaDetectada: Prisma.JsonNull,
+        formato: imp.formato === ImportFormat.pdf_ocr ? ImportFormat.pdf : imp.formato,
+        lib: null,
       },
     });
+
+    await this.prisma.ocrResult.deleteMany({ where: { importId } });
 
     void this.runProcessImport(importId);
     return this.getImportDetail(importId);

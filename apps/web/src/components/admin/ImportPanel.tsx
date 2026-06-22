@@ -208,7 +208,10 @@ export function ImportPanel() {
 
         {imp && failedProcessing && (
           <div className="mb-6 rounded-[14px] border border-danger-bd bg-danger-bg px-4 py-3 text-[13px] text-danger">
-            Falha ao processar o arquivo. Tente reprocessar ou envie outro documento.
+            <p>Falha ao processar o arquivo. Tente reprocessar ou envie outro documento.</p>
+            {imp.lib?.startsWith('erro:') && (
+              <p className="mt-2 font-mono text-[12px] opacity-90">{imp.lib.replace(/^erro:\s*/, '')}</p>
+            )}
           </div>
         )}
 
