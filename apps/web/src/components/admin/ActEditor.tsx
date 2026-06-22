@@ -19,11 +19,13 @@ import { useToast } from '@/components/ui/Toast';
 import {
   addUnit,
   publishAct,
+  restoreUnitVersion,
   saveUnits,
   submitForReview,
   updateAct,
   type UnitPayload,
 } from '@/lib/admin-api';
+import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 import { ACT_TYPE_LABELS, cn } from '@/lib/format';
 import type { ActDetail, NormativeUnit } from '@/lib/types';
 
@@ -36,6 +38,7 @@ interface EditorAct extends ActDetail {
 export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { can } = useAdminAuth();
   const [act, setAct] = useState(initialAct);
   const [units, setUnits] = useState<NormativeUnit[]>(initialAct.units);
   const [ementa, setEmenta] = useState(initialAct.ementa);
@@ -157,6 +160,22 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     }
   };
 
+  const handleRestoreVersion = async (unitId: string, versionId: string) => {
+    if (!versionId) return;
+    setSaving(true);
+    try {
+      const updated = await restoreUnitVersion(act.id, unitId, versionId);
+      setAct(updated);
+      setUnits(updated.units);
+      toast('Versão anterior restaurada', 'ok');
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao restaurar versão', 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const statusLabel: Record<string, string> = {
     rascunho: 'Rascunho',
     em_revisao: 'Em revisão',
@@ -174,15 +193,17 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 Voltar
               </Button>
             </Link>
-            <Button variant="outlined" size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? 'Salvando...' : 'Salvar rascunho'}
-            </Button>
-            {act.statusPublicacao !== 'publicado' && (
+            {can('acts:write') && act.statusPublicacao !== 'publicado' && (
+              <Button variant="outlined" size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? 'Salvando...' : 'Salvar rascunho'}
+              </Button>
+            )}
+            {can('acts:write') && act.statusPublicacao !== 'publicado' && (
               <Button variant="tonal" size="sm" onClick={handleSubmitReview}>
                 Enviar para revisão
               </Button>
             )}
-            {act.statusPublicacao === 'em_revisao' && (
+            {can('acts:publish') && act.statusPublicacao === 'em_revisao' && (
               <Button size="sm" onClick={handlePublish}>
                 Publicar
               </Button>
@@ -288,6 +309,25 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                     rows={3}
                     className="w-full rounded-[8px] border border-line bg-surface px-3 py-2 text-[13px] focus-ring"
                   />
+                  {can('acts:write') && unit.versoes.length > 1 && (
+                    <Select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const versionId = e.target.value;
+                        if (versionId) handleRestoreVersion(unit.id, versionId);
+                        e.target.value = '';
+                      }}
+                      className="text-[12px]"
+                    >
+                      <option value="">Restaurar versão anterior…</option>
+                      {unit.versoes.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {new Date(v.validoDe).toLocaleDateString('pt-BR')}
+                          {v.validoAte ? ` — ${new Date(v.validoAte).toLocaleDateString('pt-BR')}` : ' — atual'}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                 </div>
                 <div className="flex shrink-0 flex-col gap-0.5">
                   <button

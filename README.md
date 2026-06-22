@@ -115,11 +115,17 @@ Todas as etapas do MVP foram concluídas:
 7. ~~Exportação HTML/PDF + download Diário Oficial~~
 8. ~~Mobile/responsivo + WCAG + marca Franca~~
 
-### Melhorias futuras (pós-MVP)
+### Melhorias implementadas (pós-MVP)
 
-- Fila assíncrona (Bull) para OCR em produção
-- Perfis RBAC granulares na UI por papel
-- Restaurar versões anteriores de dispositivos
+- Filtros avançados na busca pública (número, assunto, data de publicação)
+- Preview DOCX na importação
+- RBAC na UI do painel admin (menu e ações por permissão)
+- Restaurar versões anteriores de dispositivos no editor
+- Processamento assíncrono de importação/OCR (status `processando` + polling)
+
+### Melhorias futuras
+
+- Fila Bull/Redis dedicada para OCR em alta escala (opcional `REDIS_URL`)
 - Assets oficiais PNG do handoff (`franca-mark.png`, lockup)
 
 ## Deploy (Railway / Coolify)

@@ -42,6 +42,10 @@ export function searchActs(params: {
   tipo?: string;
   situacao?: string;
   ano?: string;
+  numero?: string;
+  assunto?: string;
+  publicadoDe?: string;
+  publicadoAte?: string;
   page?: number;
 }) {
   const qs = new URLSearchParams();
@@ -49,6 +53,10 @@ export function searchActs(params: {
   if (params.tipo) qs.set('tipo', params.tipo);
   if (params.situacao) qs.set('situacao', params.situacao);
   if (params.ano) qs.set('ano', params.ano);
+  if (params.numero) qs.set('numero', params.numero);
+  if (params.assunto) qs.set('assunto', params.assunto);
+  if (params.publicadoDe) qs.set('publicadoDe', params.publicadoDe);
+  if (params.publicadoAte) qs.set('publicadoAte', params.publicadoAte);
   if (params.page) qs.set('page', String(params.page));
   return fetchApi<SearchResponse>(`/public/acts?${qs}`);
 }

@@ -1,10 +1,12 @@
 import { SkipLink } from '@/components/a11y/SkipLink';
+import { AdminAuthProvider } from '@/components/admin/AdminAuthContext';
 import { AdminMenuProvider } from '@/components/admin/AdminMenuContext';
 import { AdminSidebar } from '@/components/admin/AdminShell';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AdminMenuProvider>
+    <AdminAuthProvider>
+      <AdminMenuProvider>
       <SkipLink />
       <div className="flex min-h-dvh bg-canvas">
         <AdminSidebar />
@@ -16,5 +18,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </main>
       </div>
     </AdminMenuProvider>
+    </AdminAuthProvider>
   );
 }

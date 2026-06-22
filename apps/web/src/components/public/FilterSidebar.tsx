@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useTransition } from 'react';
 import { Chip } from '@/components/ui/Form';
+import { AdvancedFilters } from '@/components/public/AdvancedFilters';
 import { ACT_TYPE_LABELS, ACT_TYPES, SITUACAO_LABELS, SITUACOES } from '@/lib/format';
 import type { FilterCounts } from '@/lib/types';
 
@@ -20,6 +21,10 @@ export function FilterSidebar({
   const tipo = params.get('tipo') ?? '';
   const situacao = params.get('situacao') ?? '';
   const ano = params.get('ano') ?? '';
+  const numero = params.get('numero') ?? '';
+  const assunto = params.get('assunto') ?? '';
+  const publicadoDe = params.get('publicadoDe') ?? '';
+  const publicadoAte = params.get('publicadoAte') ?? '';
   const anos = Object.keys(counts.anos ?? {})
     .map(Number)
     .sort((a, b) => b - a);
@@ -94,6 +99,13 @@ export function FilterSidebar({
           ))}
         </div>
       </div>
+      <AdvancedFilters
+        numero={numero}
+        assunto={assunto}
+        publicadoDe={publicadoDe}
+        publicadoAte={publicadoAte}
+        onChange={update}
+      />
       {pending && <p className="text-[12px] text-ink-4" role="status">Atualizando...</p>}
     </aside>
   );

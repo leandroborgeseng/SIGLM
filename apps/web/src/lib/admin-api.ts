@@ -96,6 +96,25 @@ export function publishAct(id: string, token?: string) {
   return adminFetch<ActDetail>(`/admin/acts/${id}/publish`, { method: 'POST' }, token);
 }
 
+export function restoreUnitVersion(actId: string, unitId: string, versionId: string, token?: string) {
+  return adminFetch<ActDetail>(
+    `/admin/acts/${actId}/units/${unitId}/restore/${versionId}`,
+    { method: 'POST' },
+    token,
+  );
+}
+
+export async function fetchDocxPreviewHtml(importId: string, token?: string): Promise<string> {
+  const API_URL = getApiBaseUrl();
+  const authToken = token ?? readClientToken();
+  const res = await fetch(`${API_URL}/admin/imports/${importId}/preview-html`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error('Preview DOCX indisponível');
+  return res.text();
+}
+
 export interface ConsolidationAct {
   id: string;
   codigo: string;

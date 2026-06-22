@@ -38,6 +38,17 @@ export class ImportController {
     return this.imports.upload(file, user.id);
   }
 
+  @Get(':id/preview-html')
+  async previewHtml(@Param('id') id: string, @Res() res: Response) {
+    const html = await this.imports.getDocxPreviewHtml(id);
+    const page = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><style>
+      body{font-family:Georgia,serif;padding:1.25rem;line-height:1.65;color:#0F1B2D;font-size:14px}
+      p{margin:0 0 .75rem} table{border-collapse:collapse;width:100%} td,th{border:1px solid #E5EAF1;padding:.4rem}
+    </style></head><body>${html}</body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(page);
+  }
+
   @Get(':id/file')
   async file(@Param('id') id: string, @Res() res: Response) {
     const { path: filePath, filename } = await this.imports.getFilePath(id);

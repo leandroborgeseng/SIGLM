@@ -27,8 +27,40 @@ export interface SearchActsQuery {
   tipo?: ActType;
   situacao?: ActSituacao;
   ano?: number;
+  numero?: number;
+  assunto?: string;
+  publicadoDe?: string;
+  publicadoAte?: string;
   page?: number;
   limit?: number;
+}
+
+function extraFilters(query: SearchActsQuery): Prisma.NormativeActWhereInput {
+  const dateFilter =
+    query.publicadoDe || query.publicadoAte
+      ? {
+          ...(query.publicadoDe && { gte: new Date(query.publicadoDe) }),
+          ...(query.publicadoAte && { lte: new Date(query.publicadoAte) }),
+        }
+      : undefined;
+
+  return {
+    ...(query.numero && { numero: query.numero }),
+    ...(query.assunto && { assunto: { contains: query.assunto, mode: 'insensitive' } }),
+    ...(dateFilter && { dataPublicacao: dateFilter }),
+  };
+}
+
+function ftsFilterParams(query: SearchActsQuery) {
+  return {
+    tipo: query.tipo,
+    situacao: query.situacao,
+    ano: query.ano,
+    numero: query.numero,
+    assunto: query.assunto,
+    publicadoDe: query.publicadoDe,
+    publicadoAte: query.publicadoAte,
+  };
 }
 
 @Injectable()
@@ -63,10 +95,7 @@ export class NormativeActsService {
     }
     searchSql += ')';
 
-    const filters = buildFtsFilterSql(
-      { tipo: query.tipo, situacao: query.situacao, ano: query.ano },
-      idx,
-    );
+    const filters = buildFtsFilterSql(ftsFilterParams(query), idx);
     params.push(...filters.params);
     idx = filters.nextIndex;
 
@@ -163,6 +192,7 @@ export class NormativeActsService {
       ...(query.tipo && { tipo: query.tipo }),
       ...(query.situacao && { situacao: query.situacao }),
       ...(query.ano && { ano: query.ano }),
+      ...extraFilters(query),
     };
 
     if (term) {
@@ -382,10 +412,25 @@ export class NormativeActsService {
       },
     });
     if (!act) throw new NotFoundException('Ato normativo não encontrado');
+
+    const unitIds = act.units.map((u) => u.id);
+    const versions = await this.prisma.normativeVersion.findMany({
+      where: { unitId: { in: unitIds } },
+      orderBy: { validoDe: 'desc' },
+    });
+    const versionsByUnit = versions.reduce<Record<string, typeof versions>>((acc, v) => {
+      (acc[v.unitId] ??= []).push(v);
+      return acc;
+    }, {});
+
     return {
       ...act,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
       hierarchyValid: this.validateHierarchy(act.units),
+      units: act.units.map((unit) => ({
+        ...unit,
+        versoes: versionsByUnit[unit.id] ?? [],
+      })),
     };
   }
 
@@ -611,6 +656,42 @@ export class NormativeActsService {
       return `Art. ${n}º`;
     }
     return undefined;
+  }
+
+  async restoreUnitVersion(actId: string, unitId: string, versionId: string) {
+    const act = await this.ensureAct(actId);
+    if (act.statusPublicacao === PublicationStatus.publicado) {
+      throw new BadRequestException('Ato publicado — não é possível restaurar versões');
+    }
+
+    const unit = act.units.find((u) => u.id === unitId);
+    if (!unit) throw new NotFoundException('Dispositivo não encontrado');
+
+    const version = await this.prisma.normativeVersion.findFirst({
+      where: { id: versionId, unitId },
+    });
+    if (!version) throw new NotFoundException('Versão não encontrada');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.normativeVersion.updateMany({
+        where: { unitId, validoAte: null },
+        data: { validoAte: new Date() },
+      });
+      await tx.normativeUnit.update({
+        where: { id: unitId },
+        data: { texto: version.texto },
+      });
+      await tx.normativeVersion.create({
+        data: {
+          unitId,
+          texto: version.texto,
+          validoDe: new Date(),
+          origemActId: actId,
+        },
+      });
+    });
+
+    return this.getAdminById(actId);
   }
 
   private async createVersionForUnit(

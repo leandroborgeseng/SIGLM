@@ -33,6 +33,10 @@ export class PublicActsController {
     @Query('tipo') tipo?: ActType,
     @Query('situacao') situacao?: ActSituacao,
     @Query('ano') ano?: string,
+    @Query('numero') numero?: string,
+    @Query('assunto') assunto?: string,
+    @Query('publicadoDe') publicadoDe?: string,
+    @Query('publicadoAte') publicadoAte?: string,
     @Query('page') page?: string,
   ) {
     return this.acts.searchPublic({
@@ -40,6 +44,10 @@ export class PublicActsController {
       tipo,
       situacao,
       ano: ano ? Number(ano) : undefined,
+      numero: numero ? Number(numero) : undefined,
+      assunto,
+      publicadoDe,
+      publicadoAte,
       page: page ? Number(page) : 1,
     });
   }
@@ -124,5 +132,15 @@ export class AdminActsController {
   @RequirePermissions('acts:publish')
   publish(@Param('id') id: string) {
     return this.acts.publish(id);
+  }
+
+  @Post(':id/units/:unitId/restore/:versionId')
+  @RequirePermissions('acts:write')
+  restoreVersion(
+    @Param('id') id: string,
+    @Param('unitId') unitId: string,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.acts.restoreUnitVersion(id, unitId, versionId);
   }
 }

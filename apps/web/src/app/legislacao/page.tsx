@@ -20,7 +20,17 @@ export const metadata: Metadata = {
 async function Results({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; tipo?: string; situacao?: string; ano?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    tipo?: string;
+    situacao?: string;
+    ano?: string;
+    numero?: string;
+    assunto?: string;
+    publicadoDe?: string;
+    publicadoAte?: string;
+    page?: string;
+  }>;
 }) {
   const sp = await searchParams;
   let data;
@@ -30,6 +40,10 @@ async function Results({
       tipo: sp.tipo,
       situacao: sp.situacao,
       ano: sp.ano,
+      numero: sp.numero,
+      assunto: sp.assunto,
+      publicadoDe: sp.publicadoDe,
+      publicadoAte: sp.publicadoAte,
       page: sp.page ? Number(sp.page) : 1,
     });
   } catch (err) {
@@ -88,7 +102,17 @@ async function Results({
 export default async function LegislacaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; tipo?: string; situacao?: string; ano?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    tipo?: string;
+    situacao?: string;
+    ano?: string;
+    numero?: string;
+    assunto?: string;
+    publicadoDe?: string;
+    publicadoAte?: string;
+    page?: string;
+  }>;
 }) {
   let counts: Awaited<ReturnType<typeof getFilterCounts>> | null = null;
   let apiError: string | null = null;

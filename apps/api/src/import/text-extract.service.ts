@@ -14,6 +14,12 @@ export class TextExtractService {
     return { text: result.value.trim(), lib: 'mammoth.js', pages: 1 };
   }
 
+  async docxToHtml(filePath: string): Promise<string> {
+    const buffer = await fs.readFile(filePath);
+    const result = await mammoth.convertToHtml({ buffer });
+    return result.value;
+  }
+
   async extractPdf(filePath: string): Promise<{
     text: string;
     lib: string;

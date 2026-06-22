@@ -1,41 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import { LogOut } from 'lucide-react';
-import {
-  ACCESS_TOKEN_COOKIE,
-  clearAuthCookies,
-  fetchMe,
-  type AuthUser,
-} from '@/lib/auth';
-
-function readCookie(name: string): string | undefined {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : undefined;
-}
+import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 
 export function AdminUserPanel() {
-  const router = useRouter();
-  const [user, setUser] = useState<AuthUser | null>(null);
-
-  useEffect(() => {
-    const token = readCookie(ACCESS_TOKEN_COOKIE);
-    if (!token) return;
-    fetchMe(token)
-      .then(setUser)
-      .catch(() => {
-        clearAuthCookies();
-        router.push('/admin/login');
-      });
-  }, [router]);
-
-  const logout = () => {
-    clearAuthCookies();
-    router.push('/admin/login');
-    router.refresh();
-  };
-
+  const { user, loading, logout } = useAdminAuth();
   const initial = user?.nome?.charAt(0)?.toUpperCase() ?? '?';
 
   return (
@@ -46,7 +15,7 @@ export function AdminUserPanel() {
         </div>
         <div className="min-w-0">
           <p className="truncate text-[13px] font-medium text-ink">
-            {user?.nome ?? 'Carregando...'}
+            {loading ? 'Carregando...' : (user?.nome ?? '—')}
           </p>
           <p className="truncate text-[11px] text-ink-3">{user?.email ?? ''}</p>
         </div>

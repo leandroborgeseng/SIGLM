@@ -11,6 +11,7 @@ import { Input, Select } from '@/components/ui/Form';
 import { useToast } from '@/components/ui/Toast';
 import {
   confirmImport,
+  fetchDocxPreviewHtml,
   fetchImportFileUrl,
   getImport,
   uploadImport,
@@ -28,6 +29,7 @@ export function ImportPanel() {
 
   const [imp, setImp] = useState<ImportDetail | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+  const [docxPreviewHtml, setDocxPreviewHtml] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [meta, setMeta] = useState({ tipo: 'lei', numero: '', ano: String(new Date().getFullYear()), ementa: '' });
@@ -46,6 +48,24 @@ export function ImportPanel() {
   useEffect(() => {
     if (importId) load(importId).catch(() => toast('Importação não encontrada', 'danger'));
   }, [importId, load, toast]);
+
+  useEffect(() => {
+    if (!importId || !imp || imp.status !== 'processando') return;
+    const timer = setInterval(() => {
+      load(importId).catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [importId, imp?.status, load]);
+
+  useEffect(() => {
+    if (!imp?.id || imp.formato !== 'docx') {
+      setDocxPreviewHtml(null);
+      return;
+    }
+    fetchDocxPreviewHtml(imp.id)
+      .then(setDocxPreviewHtml)
+      .catch(() => toast('Preview DOCX indisponível', 'warn'));
+  }, [imp?.id, imp?.formato, toast]);
 
   useEffect(() => {
     if (!imp?.id || !imp.formato.includes('pdf')) {
@@ -68,6 +88,12 @@ export function ImportPanel() {
     setUploading(true);
     try {
       const data = await uploadImport(file);
+      if (data.status === 'processando') {
+        toast('Processando arquivo em segundo plano...', 'ok');
+        router.push(`/admin/importar?id=${data.id}`);
+        setImp(data);
+        return;
+      }
       if (data.needsOcrReview) {
         toast('PDF digitalizado — revise o OCR antes de continuar', 'warn');
         router.push(`/admin/ocr?importId=${data.id}`);
@@ -102,7 +128,15 @@ export function ImportPanel() {
     }
   };
 
-  const stepIndex = !imp ? 0 : imp.status === 'conferencia' ? 1 : imp.status === 'rascunho' ? 2 : 0;
+  const stepIndex = !imp
+    ? 0
+    : imp.status === 'processando'
+      ? 0
+      : imp.status === 'conferencia'
+        ? 1
+        : imp.status === 'rascunho'
+          ? 2
+          : 0;
 
   return (
     <>
@@ -141,6 +175,12 @@ export function ImportPanel() {
             />
             {uploading && <p className="mt-4 text-[13px] text-brand">Processando...</p>}
           </label>
+        )}
+
+        {imp && imp.status === 'processando' && (
+          <div className="mb-6 rounded-[14px] border border-brand-soft bg-brand-soft/40 px-4 py-3 text-[13px] text-brand">
+            Processando arquivo (extração/OCR). Esta página atualiza automaticamente.
+          </div>
         )}
 
         {imp && (
@@ -189,9 +229,21 @@ export function ImportPanel() {
                       Carregando preview...
                     </div>
                   )
+                ) : imp.formato === 'docx' ? (
+                  docxPreviewHtml ? (
+                    <iframe
+                      srcDoc={docxPreviewHtml}
+                      className="h-64 w-full rounded-[10px] border border-line-2 bg-surface"
+                      title="Preview DOCX"
+                    />
+                  ) : (
+                    <div className="flex h-64 items-center justify-center rounded-[10px] bg-surface-2 text-[13px] text-ink-3">
+                      Carregando preview...
+                    </div>
+                  )
                 ) : (
                   <div className="flex h-64 items-center justify-center rounded-[10px] bg-surface-2 text-[13px] text-ink-3">
-                    Documento Word — preview indisponível
+                    Preview indisponível para este formato
                   </div>
                 )}
               </div>

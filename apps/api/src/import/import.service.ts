@@ -43,23 +43,33 @@ export class ImportService {
       data: {
         arquivo: storedName,
         formato,
-        status: ImportStatus.upload,
+        status: ImportStatus.processando,
         criadoPorId: userId,
       },
     });
 
+    void this.runProcessImport(imp.id);
+
+    return this.getImportDetail(imp.id);
+  }
+
+  private async runProcessImport(importId: string) {
     try {
-      return await this.processImport(imp.id);
+      await this.processImport(importId);
     } catch (err) {
+      console.error(`[import] falhou ${importId}:`, err);
       await this.prisma.import.update({
-        where: { id: imp.id },
+        where: { id: importId },
         data: { status: ImportStatus.erro },
       });
-      throw err;
     }
   }
 
   async processImport(importId: string) {
+    await this.prisma.import.update({
+      where: { id: importId },
+      data: { status: ImportStatus.processando },
+    });
     const imp = await this.prisma.import.findUnique({ where: { id: importId } });
     if (!imp) throw new NotFoundException('Importação não encontrada');
 
@@ -337,6 +347,16 @@ export class ImportService {
       fileUrl: `/admin/imports/${imp.id}/file`,
       criadoEm: imp.criadoEm,
     };
+  }
+
+  async getDocxPreviewHtml(importId: string): Promise<string> {
+    const imp = await this.prisma.import.findUnique({ where: { id: importId } });
+    if (!imp) throw new NotFoundException('Importação não encontrada');
+    if (imp.formato !== ImportFormat.docx) {
+      throw new BadRequestException('Preview HTML disponível apenas para DOCX');
+    }
+    const filePath = path.join(this.uploadDir, imp.arquivo);
+    return this.textExtract.docxToHtml(filePath);
   }
 
   async getFilePath(importId: string): Promise<{ path: string; filename: string }> {

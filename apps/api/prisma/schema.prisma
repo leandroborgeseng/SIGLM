@@ -249,6 +249,7 @@ enum ImportFormat {
 
 enum ImportStatus {
   upload
+  processando
   conferencia
   rascunho
   publicado

@@ -2,34 +2,29 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  FileText,
-  GitMerge,
-  LayoutDashboard,
-  Menu,
-  ScanText,
-  Upload,
-  X,
-} from 'lucide-react';
+import { LayoutDashboard, Menu, X } from 'lucide-react';
 import { FrancaMark } from '@/components/brand/FrancaMark';
+import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 import { AdminUserPanel } from '@/components/admin/AdminUserPanel';
 import { useAdminMenu } from '@/components/admin/AdminMenuContext';
+import { filterNavByPermissions } from '@/lib/permissions';
 import { cn } from '@/lib/format';
-
-const NAV = [
-  { href: '/admin/atos', label: 'Atos', icon: FileText, short: 'Atos' },
-  { href: '/admin/importar', label: 'Importar', icon: Upload, short: 'Import' },
-  { href: '/admin/ocr', label: 'OCR', icon: ScanText, short: 'OCR' },
-  { href: '/admin/consolidar', label: 'Consolidar', icon: GitMerge, short: 'Consol.' },
-];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { user } = useAdminAuth();
+  const nav = filterNavByPermissions(user?.permissions);
+
+  if (nav.length === 0) {
+    return (
+      <p className="px-3 text-[13px] text-ink-3">Sem permissões de gestão nesta conta.</p>
+    );
+  }
 
   return (
     <>
       <p className="text-section mb-2 px-3">Gestão</p>
-      {NAV.map(({ href, label, icon: Icon }) => {
+      {nav.map(({ href, label, icon: Icon }) => {
         const active = pathname.startsWith(href);
         return (
           <Link
@@ -56,6 +51,8 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 export function AdminSidebar() {
   const { open, close } = useAdminMenu();
   const pathname = usePathname();
+  const { user } = useAdminAuth();
+  const nav = filterNavByPermissions(user?.permissions);
 
   return (
     <>
@@ -104,32 +101,34 @@ export function AdminSidebar() {
         </div>
       )}
 
-      <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur lg:hidden"
-        aria-label="Navegação administrativa"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
-        <ul className="mx-auto flex max-w-lg">
-          {NAV.map(({ href, short, icon: Icon }) => {
-            const active = pathname.startsWith(href);
-            return (
-              <li key={href} className="flex-1">
-                <Link
-                  href={href}
-                  className={cn(
-                    'touch-target flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold',
-                    active ? 'text-brand' : 'text-ink-3',
-                  )}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  <Icon className="h-5 w-5" aria-hidden="true" />
-                  {short}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
+      {nav.length > 0 && (
+        <nav
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur lg:hidden"
+          aria-label="Navegação administrativa"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        >
+          <ul className="mx-auto flex max-w-lg">
+            {nav.map(({ href, short, icon: Icon }) => {
+              const active = pathname.startsWith(href);
+              return (
+                <li key={href} className="flex-1">
+                  <Link
+                    href={href}
+                    className={cn(
+                      'touch-target flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold',
+                      active ? 'text-brand' : 'text-ink-3',
+                    )}
+                    aria-current={active ? 'page' : undefined}
+                  >
+                    <Icon className="h-5 w-5" aria-hidden="true" />
+                    {short}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      )}
     </>
   );
 }

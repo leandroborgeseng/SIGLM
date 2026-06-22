@@ -18,6 +18,10 @@ export interface FtsFilterParams {
   tipo?: string;
   situacao?: string;
   ano?: number;
+  numero?: number;
+  assunto?: string;
+  publicadoDe?: string;
+  publicadoAte?: string;
 }
 
 export function buildFtsFilterSql(
@@ -39,6 +43,22 @@ export function buildFtsFilterSql(
   if (filters.ano) {
     params.push(filters.ano);
     parts.push(`na.ano = $${i++}`);
+  }
+  if (filters.numero) {
+    params.push(filters.numero);
+    parts.push(`na.numero = $${i++}`);
+  }
+  if (filters.assunto) {
+    params.push(`%${filters.assunto}%`);
+    parts.push(`na.assunto ILIKE $${i++}`);
+  }
+  if (filters.publicadoDe) {
+    params.push(filters.publicadoDe);
+    parts.push(`na.data_publicacao >= $${i++}::date`);
+  }
+  if (filters.publicadoAte) {
+    params.push(filters.publicadoAte);
+    parts.push(`na.data_publicacao <= $${i++}::date`);
   }
 
   return {
