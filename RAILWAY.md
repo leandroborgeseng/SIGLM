@@ -5,13 +5,13 @@ Guia definitivo para o projeto **SIGLM** (`leandroborgeseng/SIGLM`).
 ## Arquitetura no Railway
 
 ```
-Postgres  →  backend (API NestJS)  →  web (Next.js)
+Postgres  →  siglm-backend (API NestJS)  →  web (Next.js)
 ```
 
 | Serviço Railway | Config File | Dockerfile |
 |-----------------|-------------|------------|
 | **Postgres** | — | template Railway |
-| **backend** | `railway.api.toml` | `apps/api/Dockerfile` |
+| **siglm-backend** | `railway.api.toml` | `apps/api/Dockerfile` |
 | **web** | `apps/web/railway.toml` | `apps/web/Dockerfile` |
 
 ---
@@ -22,7 +22,7 @@ Criado via **+ New → Database → PostgreSQL**. Não precisa de variables manu
 
 ---
 
-## 2. Backend (API)
+## 2. siglm-backend (API)
 
 ### Settings → Build
 
@@ -88,20 +88,27 @@ GET https://SEU-DOMINIO-BACKEND/api/health
 
 ```env
 NODE_ENV=production
-API_INTERNAL_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:3001/api
-API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api
+API_INTERNAL_URL=http://${{siglm-backend.RAILWAY_PRIVATE_DOMAIN}}:3001/api
+API_URL=https://${{siglm-backend.RAILWAY_PUBLIC_DOMAIN}}/api
 ```
 
 > `API_INTERNAL_URL` tenta rede privada (sem egress). `API_URL` é **fallback** se a privada falhar.
 >
-> O nome do serviço (`backend`) deve ser o **nome exato** no Railway. Se for `siglm`, use `${{siglm.*}}`.
+> O serviço da API no Railway se chama **`siglm-backend`** → domínio privado `siglm-backend.railway.internal`.
+> Use `${{siglm-backend.RAILWAY_PRIVATE_DOMAIN}}` nas referências (nome exato do serviço).
+
+Ou cole a URL fixa (se Add Reference não resolver):
+
+```env
+API_INTERNAL_URL=http://siglm-backend.railway.internal:3001/api
+```
 
 ### O que NÃO colocar no web
 
 ```env
-API_URL=https://${{backend.RAILWAY_PUBLIC_DOMAIN}}/api   ⚠️ fallback (pode gerar aviso egress)
-NEXT_PUBLIC_API_URL                                     ❌
-DATABASE_URL                                            ❌
+NEXT_PUBLIC_API_URL   ❌
+DATABASE_URL          ❌
+JWT_*                 ❌
 ```
 
 ---
@@ -109,7 +116,7 @@ DATABASE_URL                                            ❌
 ## 4. Ordem de deploy
 
 1. Postgres (Active)
-2. **backend** — aguarde `/api/health` OK
+2. **siglm-backend** — aguarde `/api/health` OK
 3. Atualize `CORS_ORIGIN` na API com URL exata do web
 4. **web** — redeploy após API no ar
 5. `RUN_SEED=false` na API
@@ -141,10 +148,10 @@ DATABASE_URL                                            ❌
 | Sintoma | Causa | Solução |
 |---------|-------|---------|
 | `No start command detected` | Railpack em vez de Docker | Config File + Dockerfile corretos |
-| `DATABASE_URL not found` | Variável só no Postgres | Add Reference no **backend** |
-| Web pede `DATABASE_URL` | Web usando Dockerfile da API | Web: `apps/web/railway.toml` + `apps/web/Dockerfile` |
-| `siglm.railway.internal:/api` (porta vazia) | `${{backend.PORT}}` não existe entre serviços | Use `:3001` fixo e `PORT=3001` no backend |
-| `http://api:3001/api` no web | `API_INTERNAL_URL` errada | Use referências `${{backend.*}}` ou URL pública |
+| `DATABASE_URL not found` | Variável só no Postgres | Add Reference no **siglm-backend** |
+| `siglm.railway.internal` (nome errado) | Serviço se chama `siglm-backend` | Use `siglm-backend.railway.internal:3001` |
+| `siglm.railway.internal:/api` (porta vazia) | `${{*.PORT}}` não existe entre serviços | Use `:3001` fixo e `PORT=3001` no siglm-backend |
+| `http://api:3001/api` no web | `API_INTERNAL_URL` errada | `http://siglm-backend.railway.internal:3001/api` |
 | `ts-node ENOENT` no seed | Versão antiga | Pull `main` (seed compila para JS) |
 | Application error no web | API offline ou URL errada | Confira `API_URL` e health da API |
 | CORS bloqueado | `CORS_ORIGIN` incorreto | URL exata do web na API |
@@ -157,5 +164,6 @@ DATABASE_URL                                            ❌
 | Sintaxe | Uso |
 |---------|-----|
 | `${{Postgres.DATABASE_URL}}` | API → banco |
-| `${{backend.RAILWAY_PRIVATE_DOMAIN}}` | Web → API via rede privada |
-| `:3001` | Porta fixa (defina `PORT=3001` no backend) |
+| `${{siglm-backend.RAILWAY_PRIVATE_DOMAIN}}` | → `siglm-backend.railway.internal` |
+| `${{siglm-backend.RAILWAY_PUBLIC_DOMAIN}}` | URL pública da API (fallback) |
+| `:3001` | Porta fixa (`PORT=3001` no siglm-backend) |
