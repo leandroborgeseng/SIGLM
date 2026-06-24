@@ -37,7 +37,9 @@ export function ImportPanel() {
   const [confirming, setConfirming] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [meta, setMeta] = useState({ tipo: 'lei', numero: '', ano: String(new Date().getFullYear()), ementa: '' });
+  const [efeitosAceitos, setEfeitosAceitos] = useState<Set<string>>(new Set());
   const metaAppliedFor = useRef<string | null>(null);
+  const effectsInitFor = useRef<string | null>(null);
 
   const applyDetectedMeta = useCallback((data: ImportDetail) => {
     const detected = data.estruturaDetectada?.metadados;
@@ -66,7 +68,18 @@ export function ImportPanel() {
 
   useEffect(() => {
     metaAppliedFor.current = null;
+    effectsInitFor.current = null;
   }, [importId]);
+
+  useEffect(() => {
+    if (!imp?.estruturaDetectada?.efeitosSugeridos) return;
+    if (effectsInitFor.current === imp.id) return;
+    effectsInitFor.current = imp.id;
+    const ids = imp.estruturaDetectada.efeitosSugeridos
+      .filter((e) => e.aceito)
+      .map((e) => e.id);
+    setEfeitosAceitos(new Set(ids));
+  }, [imp?.id, imp?.estruturaDetectada?.efeitosSugeridos]);
 
   useEffect(() => {
     if (!imp?.estruturaDetectada) return;
@@ -167,6 +180,7 @@ export function ImportPanel() {
         numero: meta.numero ? Number(meta.numero) : undefined,
         ano: Number(meta.ano),
         ementa: meta.ementa || undefined,
+        efeitosAceitos: [...efeitosAceitos],
       });
       toast(`Rascunho criado: ${result.codigo}`, 'ok');
       router.push(result.editorUrl);
@@ -388,6 +402,57 @@ export function ImportPanel() {
                 <p className="mt-3 text-[12px] text-warn">Revise manualmente trechos com confiança &lt; 80%</p>
               </div>
             </div>
+
+            {(imp.estruturaDetectada?.efeitosSugeridos?.length ?? 0) > 0 && (
+              <div className="mt-6 rounded-[12px] border border-line bg-surface p-4">
+                <h3 className="mb-2 text-[14px] font-semibold text-ink">
+                  Efeitos legislativos sugeridos
+                </h3>
+                <p className="mb-3 text-[12px] text-ink-3">
+                  Cláusulas alteradoras detectadas automaticamente. Marque as que deseja vincular ao
+                  rascunho.
+                </p>
+                <ul className="space-y-2">
+                  {imp.estruturaDetectada!.efeitosSugeridos!.map((fx) => (
+                    <li
+                      key={fx.id}
+                      className={`rounded-[10px] border px-3 py-2 ${
+                        fx.confianca < 70 ? 'border-warn-bd bg-warn-bg' : 'border-line-2 bg-surface-2'
+                      }`}
+                    >
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={efeitosAceitos.has(fx.id)}
+                          onChange={(e) => {
+                            setEfeitosAceitos((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(fx.id);
+                              else next.delete(fx.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <Badge variant="info" className="text-[10px]">
+                              {fx.tipoEfeito.replace(/_/g, ' ')}
+                            </Badge>
+                            <span className="font-mono text-[12px] text-ink">
+                              {fx.sourceTag} → {fx.normaCodigo ?? 'Norma?'}
+                              {fx.targetIdentificacao ? ` / ${fx.targetIdentificacao}` : ''}
+                            </span>
+                            <span className="font-mono text-[11px] text-ink-4">{fx.confianca}%</span>
+                          </span>
+                          <p className="mt-1 line-clamp-2 text-[12px] text-ink-3">{fx.trecho}</p>
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="mt-6 flex gap-2">
               {imp.actId ? (

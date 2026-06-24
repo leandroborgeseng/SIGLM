@@ -94,6 +94,7 @@ export class ImportController {
       ano?: number;
       ementa?: string;
       orgaoOrigem?: string;
+      efeitosAceitos?: string[];
     },
   ) {
     return this.imports.confirmDraft(id, body);

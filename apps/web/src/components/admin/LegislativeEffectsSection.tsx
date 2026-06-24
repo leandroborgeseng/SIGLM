@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
+import { UnitTreePicker } from '@/components/admin/UnitTreePicker';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
 import { listConsolidationActs, listConsolidationUnits } from '@/lib/admin-api';
@@ -54,6 +55,14 @@ export function LegislativeEffectsSection({
       .then((all) => setActs(all.filter((a) => a.id !== actId)))
       .catch(() => undefined);
   }, [actId]);
+
+  useEffect(() => {
+    const normaIds = [...new Set(effects.map((e) => e.normaAlteradaActId).filter(Boolean))];
+    for (const id of normaIds) {
+      if (!unitsByAct[id]) void loadUnits(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effects]);
 
   const loadUnits = async (normaId: string) => {
     if (unitsByAct[normaId]) return;
@@ -141,18 +150,11 @@ export function LegislativeEffectsSection({
               {effect.normaAlteradaActId && effect.tipoEfeito !== 'inclusao' && (
                 <div>
                   <label className="mb-1 block text-[11px] text-ink-4">Dispositivo afetado</label>
-                  <Select
-                    value={effect.targetUnitId ?? ''}
-                    onChange={(e) => updateEffect(index, { targetUnitId: e.target.value || null })}
-                  >
-                    <option value="">Selecione na árvore…</option>
-                    {normaUnits.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.identificacao ?? UNIT_TYPE_LABELS[u.tipoUnidade as UnitType]} (
-                        {UNIT_TYPE_LABELS[u.tipoUnidade as UnitType]})
-                      </option>
-                    ))}
-                  </Select>
+                  <UnitTreePicker
+                    units={normaUnits}
+                    value={effect.targetUnitId ?? null}
+                    onChange={(id) => updateEffect(index, { targetUnitId: id })}
+                  />
                 </div>
               )}
 
@@ -197,20 +199,21 @@ export function LegislativeEffectsSection({
                     </div>
                   </div>
                   <div>
+                    <label className="mb-1 block text-[11px] text-ink-4">Identificação (ex.: Art. 6º-A)</label>
+                    <Input
+                      value={effect.novaIdentificacao ?? ''}
+                      onChange={(e) => updateEffect(index, { novaIdentificacao: e.target.value })}
+                      placeholder="Opcional — ex.: Art. 6º-A, § 3º"
+                      className="font-mono text-[12px]"
+                    />
+                  </div>
+                  <div>
                     <label className="mb-1 block text-[11px] text-ink-4">Dispositivo de referência</label>
-                    <Select
-                      value={effect.referenciaUnitId ?? ''}
-                      onChange={(e) =>
-                        updateEffect(index, { referenciaUnitId: e.target.value || null })
-                      }
-                    >
-                      <option value="">Selecione…</option>
-                      {normaUnits.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.identificacao ?? UNIT_TYPE_LABELS[u.tipoUnidade as UnitType]}
-                        </option>
-                      ))}
-                    </Select>
+                    <UnitTreePicker
+                      units={normaUnits}
+                      value={effect.referenciaUnitId ?? null}
+                      onChange={(id) => updateEffect(index, { referenciaUnitId: id })}
+                    />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-ink-4">Texto incluído</label>
@@ -225,20 +228,46 @@ export function LegislativeEffectsSection({
               )}
 
               {effect.tipoEfeito === 'alteracao_redacao' && (
-                <div>
-                  <label className="mb-1 block text-[11px] text-ink-4">Nova redação</label>
-                  <textarea
-                    value={effect.textoNovo ?? ''}
-                    onChange={(e) => updateEffect(index, { textoNovo: e.target.value })}
-                    rows={2}
-                    placeholder="Nova redação do dispositivo afetado"
-                    className="w-full rounded-[8px] border border-line px-2 py-1.5 text-[12px] focus-ring"
-                  />
+                <div className="space-y-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-ink-4">Nova redação (texto)</label>
+                    <textarea
+                      value={effect.textoNovo ?? ''}
+                      onChange={(e) =>
+                        updateEffect(index, { textoNovo: e.target.value, redacaoUnitId: null })
+                      }
+                      rows={2}
+                      placeholder="Nova redação do dispositivo afetado"
+                      className="w-full rounded-[8px] border border-line px-2 py-1.5 text-[12px] focus-ring"
+                    />
+                  </div>
                   {redacaoChildUnits.length > 0 && (
-                    <p className="mt-1 text-[10px] text-ink-4">
-                      Ou vincule subdispositivo filho como nova redação ({redacaoChildUnits.length}{' '}
-                      disponível)
-                    </p>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-ink-4">
+                        Ou vincular subdispositivo filho
+                      </label>
+                      <Select
+                        value={effect.redacaoUnitId ?? ''}
+                        onChange={(e) => {
+                          const id = e.target.value || null;
+                          updateEffect(index, {
+                            redacaoUnitId: id,
+                            textoNovo: id
+                              ? (redacaoChildUnits.find((u) => u.id === id)?.texto ?? effect.textoNovo)
+                              : effect.textoNovo,
+                          });
+                        }}
+                      >
+                        <option value="">Digitar manualmente acima</option>
+                        {redacaoChildUnits.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.identificacao ?? 'Subdispositivo'} —{' '}
+                            {u.texto.slice(0, 60)}
+                            {u.texto.length > 60 ? '…' : ''}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
                   )}
                 </div>
               )}

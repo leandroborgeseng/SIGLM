@@ -6,13 +6,18 @@ import {
 import {
   ActSituacao,
   ChangeType,
+  InclusaoPosicionamento,
   UnitStatus,
   UnitType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatActCode } from '../normative-acts/normative-acts.utils';
 import { refreshSearchVector } from '../normative-acts/search.utils';
+import { isValidParent } from '../normative-acts/unit-hierarchy.utils';
 import { ApplyConsolidationDto, ConsolidationPreviewDto } from './consolidation.dto';
+import {
+  computeInclusionPlacement,
+} from './inclusion-placement.utils';
 
 @Injectable()
 export class ConsolidationService {
@@ -89,6 +94,9 @@ export class ConsolidationService {
     if (dto.tipoAlteracao === ChangeType.inclusao) {
       if (!dto.textoNovo?.trim()) {
         throw new BadRequestException('Texto do novo dispositivo é obrigatório');
+      }
+      if (dto.referenciaUnitId && !dto.posicionamento) {
+        throw new BadRequestException('Posicionamento é obrigatório quando há dispositivo de referência');
       }
       return this.applyInclusao(dto, alteradora, alterada, notaGerada, changeDate, autorId);
     }
@@ -238,22 +246,64 @@ export class ConsolidationService {
     changeDate: Date,
     autorId?: string | null,
   ) {
-    const maxOrdem = await this.prisma.normativeUnit.aggregate({
+    const existingUnits = await this.prisma.normativeUnit.findMany({
       where: { actId: alterada.id },
-      _max: { ordem: true },
+      orderBy: { ordem: 'asc' },
+      select: { id: true, ordem: true, parentUnitId: true, tipoUnidade: true },
     });
-    const ordem = (maxOrdem._max.ordem ?? -1) + 1;
+
+    const tipoUnidade = dto.tipoDispositivoIncluido ?? UnitType.artigo;
+    let insertOrdem: number;
+    let parentUnitId: string | null = null;
+
+    if (dto.referenciaUnitId && dto.posicionamento) {
+      const ref = existingUnits.find((u) => u.id === dto.referenciaUnitId);
+      if (!ref) {
+        throw new BadRequestException('Dispositivo de referência não encontrado na norma alterada');
+      }
+      if (
+        dto.posicionamento === InclusaoPosicionamento.dentro_de &&
+        !isValidParent(tipoUnidade, ref.tipoUnidade)
+      ) {
+        throw new BadRequestException(
+          `Tipo ${tipoUnidade} não pode ser inserido dentro de ${ref.tipoUnidade}`,
+        );
+      }
+      const placement = computeInclusionPlacement(
+        existingUnits,
+        dto.referenciaUnitId,
+        dto.posicionamento,
+      );
+      insertOrdem = placement.insertOrdem;
+      parentUnitId = placement.parentUnitId;
+    } else {
+      const maxOrdem = existingUnits.reduce((m, u) => Math.max(m, u.ordem), -1);
+      insertOrdem = maxOrdem + 1;
+    }
+
+    const identificacao =
+      dto.identificacao?.trim() ||
+      this.defaultIdentificacao(tipoUnidade, existingUnits.length + 1);
 
     let createdUnitId = '';
 
     await this.prisma.$transaction(async (tx) => {
+      const toShift = existingUnits.filter((u) => u.ordem >= insertOrdem);
+      for (const u of toShift.sort((a, b) => b.ordem - a.ordem)) {
+        await tx.normativeUnit.update({
+          where: { id: u.id },
+          data: { ordem: u.ordem + 1 },
+        });
+      }
+
       const created = await tx.normativeUnit.create({
         data: {
           actId: alterada.id,
-          tipoUnidade: UnitType.artigo,
-          identificacao: dto.identificacao ?? `Art. ${ordem}º`,
+          tipoUnidade,
+          identificacao,
           texto: dto.textoNovo!,
-          ordem,
+          ordem: insertOrdem,
+          parentUnitId,
           status: UnitStatus.incluida,
           origemActId: alterada.id,
           alteradoPorActId: alteradora.id,
@@ -290,6 +340,23 @@ export class ConsolidationService {
     await refreshSearchVector(this.prisma, alterada.id);
 
     return this.preview({ ...dto, unitId: createdUnitId });
+  }
+
+  private defaultIdentificacao(tipo: UnitType, seq: number): string {
+    switch (tipo) {
+      case UnitType.artigo:
+        return `Art. ${seq}º`;
+      case UnitType.paragrafo:
+        return `§ ${seq}º`;
+      case UnitType.inciso:
+        return 'I';
+      case UnitType.capitulo:
+        return `CAPÍTULO ${seq}`;
+      case UnitType.titulo:
+        return `TÍTULO ${seq}`;
+      default:
+        return '';
+    }
   }
 
   private async loadContext(dto: ConsolidationPreviewDto) {
@@ -412,6 +479,9 @@ export class ConsolidationService {
         fundamento: effect.observacoes ?? undefined,
         data: effect.dataVigencia.toISOString().slice(0, 10),
         identificacao: effect.novaIdentificacao ?? undefined,
+        referenciaUnitId: effect.referenciaUnitId ?? undefined,
+        posicionamento: effect.posicionamento ?? undefined,
+        tipoDispositivoIncluido: effect.tipoDispositivoIncluido ?? undefined,
       };
 
       await this.apply(dto, null);

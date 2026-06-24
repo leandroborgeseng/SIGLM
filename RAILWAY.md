@@ -155,10 +155,17 @@ JWT_*                 ❌
 - [ ] Volume `/app/apps/api/uploads` na API
 - [ ] `RUN_SEED=false` após seed
 - [ ] Web **não** tem `DATABASE_URL`
+- [ ] `./scripts/smoke-test.sh` com `API_URL` e `WEB_URL` de produção
 
 ---
 
-## 6. Login admin
+## 5.1 Higiene de produção (obrigatório)
+
+1. Definir `RUN_SEED=false` no siglm-backend após o primeiro deploy com seed
+2. Trocar senha do usuário admin (não usar `admin123`)
+3. Confirmar volume persistente em `/app/apps/api/uploads`
+4. Configurar backup do Postgres (Railway ou externo)
+5. Verificar logs: `prisma migrate deploy` aplicado com sucesso
 
 - URL: `https://siglm.up.railway.app/admin/login`
 - E-mail: `admin@franca.sp.gov.br`

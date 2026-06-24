@@ -1,4 +1,4 @@
-import { ChangeType } from '@prisma/client';
+import { ChangeType, InclusaoPosicionamento, UnitType } from '@prisma/client';
 import {
   IsDateString,
   IsEnum,
@@ -39,6 +39,21 @@ export class ConsolidationPreviewDto {
   @IsOptional()
   @IsDateString()
   data?: string;
+
+  @ValidateIf((o) => o.tipoAlteracao === ChangeType.inclusao)
+  @IsOptional()
+  @IsUUID()
+  referenciaUnitId?: string;
+
+  @ValidateIf((o) => o.tipoAlteracao === ChangeType.inclusao)
+  @IsOptional()
+  @IsEnum(InclusaoPosicionamento)
+  posicionamento?: InclusaoPosicionamento;
+
+  @ValidateIf((o) => o.tipoAlteracao === ChangeType.inclusao)
+  @IsOptional()
+  @IsEnum(UnitType)
+  tipoDispositivoIncluido?: UnitType;
 }
 
 export class ApplyConsolidationDto extends ConsolidationPreviewDto {

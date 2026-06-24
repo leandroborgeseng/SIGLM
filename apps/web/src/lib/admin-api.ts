@@ -178,6 +178,19 @@ export function applyConsolidation(payload: Record<string, unknown>, token?: str
   }, token);
 }
 
+export interface SuggestedImportEffect {
+  id: string;
+  sourceBlockOrdem: number;
+  sourceTag: string;
+  normaCodigo: string | null;
+  targetIdentificacao: string | null;
+  tipoEfeito: string;
+  textoNovo: string | null;
+  confianca: number;
+  trecho: string;
+  aceito: boolean;
+}
+
 export interface ImportDetail {
   id: string;
   arquivo: string;
@@ -189,6 +202,7 @@ export interface ImportDetail {
     blocos: { tag: string; tipo: string; texto: string; confianca: number; ordem: number }[];
     mediaConfianca: number;
     ocrAprovado?: boolean;
+    efeitosSugeridos?: SuggestedImportEffect[];
     metadados?: {
       tipo: string | null;
       numero: number | null;
@@ -255,7 +269,14 @@ export function approveOcr(id: string) {
 
 export function confirmImport(
   id: string,
-  meta?: { tipo?: string; numero?: number; ano?: number; ementa?: string; orgaoOrigem?: string },
+  meta?: {
+    tipo?: string;
+    numero?: number;
+    ano?: number;
+    ementa?: string;
+    orgaoOrigem?: string;
+    efeitosAceitos?: string[];
+  },
 ) {
   return adminFetch<{ actId: string; codigo: string; editorUrl: string }>(
     `/admin/imports/${id}/confirm`,

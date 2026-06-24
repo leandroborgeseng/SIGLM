@@ -3,15 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ImportFormat, ImportStatus, Prisma, PublicationStatus, UnitType } from '@prisma/client';
+import { ImportFormat, ImportStatus, Prisma, PublicationStatus, UnitType, EffectType, InclusaoPosicionamento, ActType } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { ATTACHMENTS_DIR } from '../common/uploads';
 import { buildActSlug, formatActCode } from '../normative-acts/normative-acts.utils';
-import { ActType } from '@prisma/client';
 import { OcrService } from './ocr.service';
 import { mergeOcrPages, parseStructure } from './structure.parser';
+import { parseLegislativeEffects, type SuggestedLegislativeEffect } from './effects.parser';
 import { TextExtractService } from './text-extract.service';
 
 @Injectable()
@@ -114,7 +114,7 @@ export class ImportService {
     }
 
     const arquivoOriginal = imp.arquivo.replace(/^\d+-/, '');
-    const estrutura = parseStructure(text, 96, arquivoOriginal);
+    const estrutura = this.enrichWithEffects(parseStructure(text, 96, arquivoOriginal));
     await this.prisma.import.update({
       where: { id: importId },
       data: {
@@ -248,7 +248,7 @@ export class ImportService {
     }));
 
     const arquivoOriginal = imp.arquivo.replace(/^\d+-/, '');
-    const estrutura = mergeOcrPages(pages, arquivoOriginal);
+    const estrutura = this.enrichWithEffects(mergeOcrPages(pages, arquivoOriginal));
     estrutura.ocrAprovado = true;
 
     await this.prisma.$transaction([
@@ -276,6 +276,7 @@ export class ImportService {
       ano?: number;
       ementa?: string;
       orgaoOrigem?: string;
+      efeitosAceitos?: string[];
     },
   ) {
     const imp = await this.getImportDetail(importId);
@@ -288,7 +289,7 @@ export class ImportService {
       throw new BadRequestException('Importação não está pronta para conferência');
     }
 
-    const estrutura = imp.estruturaDetectada as {
+    const estrutura = imp.estruturaDetectada as unknown as {
       blocos: {
         tag: string;
         tipo: string;
@@ -302,6 +303,7 @@ export class ImportService {
         ano?: number | null;
         ementa?: string | null;
       };
+      efeitosSugeridos?: SuggestedLegislativeEffect[];
     };
 
     const ementaBlock = estrutura.blocos.find((b) => b.tipo === 'ementa');
@@ -367,6 +369,13 @@ export class ImportService {
         });
       }
     }
+
+    await this.createEffectsFromImport(
+      act,
+      ordemToId,
+      estrutura.efeitosSugeridos ?? [],
+      meta.efeitosAceitos,
+    );
 
     const importRecord = await this.prisma.import.findUnique({ where: { id: importId } });
     if (importRecord) {
@@ -483,6 +492,86 @@ export class ImportService {
       throw new BadRequestException('Importação não é PDF/OCR');
     }
     return imp;
+  }
+
+  private enrichWithEffects<T extends { blocos: { ordem: number; tag: string; tipo: string; texto: string; confianca: number }[] }>(
+    estrutura: T,
+  ): T & { efeitosSugeridos: SuggestedLegislativeEffect[] } {
+    const efeitosSugeridos = parseLegislativeEffects(estrutura.blocos);
+    return { ...estrutura, efeitosSugeridos };
+  }
+
+  private normalizeIdentificacao(id: string | null | undefined): string {
+    if (!id) return '';
+    return id
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[°ºoO.]/g, '')
+      .replace(/^art\s*/, 'art ')
+      .trim();
+  }
+
+  private async createEffectsFromImport(
+    act: { id: string; units: { id: string; ordem: number; identificacao: string | null }[] },
+    ordemToId: Map<number, string>,
+    sugeridos: SuggestedLegislativeEffect[],
+    aceitosIds?: string[],
+  ) {
+    const toApply =
+      aceitosIds && aceitosIds.length > 0
+        ? sugeridos.filter((e) => aceitosIds.includes(e.id))
+        : sugeridos.filter((e) => e.aceito);
+
+    if (toApply.length === 0) return;
+
+    for (let ordem = 0; ordem < toApply.length; ordem++) {
+      const effect = toApply[ordem];
+      if (!effect.normaTipo || !effect.normaNumero || !effect.normaAno) continue;
+
+      const normaAlterada = await this.prisma.normativeAct.findFirst({
+        where: {
+          tipo: effect.normaTipo as ActType,
+          numero: effect.normaNumero,
+          ano: effect.normaAno,
+        },
+        include: { units: { orderBy: { ordem: 'asc' } } },
+      });
+      if (!normaAlterada) continue;
+
+      const sourceUnitId = ordemToId.get(effect.sourceBlockOrdem);
+      if (!sourceUnitId) continue;
+
+      const findUnit = (ident: string | null) => {
+        if (!ident) return null;
+        const norm = this.normalizeIdentificacao(ident);
+        return (
+          normaAlterada.units.find(
+            (u) => this.normalizeIdentificacao(u.identificacao) === norm,
+          ) ?? null
+        );
+      };
+
+      const targetUnit = findUnit(effect.targetIdentificacao);
+      const referenciaUnit = findUnit(effect.referenciaIdentificacao);
+
+      await this.prisma.legislativeEffect.create({
+        data: {
+          sourceUnitId,
+          normaAlteradaActId: normaAlterada.id,
+          targetUnitId: targetUnit?.id ?? null,
+          tipoEfeito: effect.tipoEfeito as EffectType,
+          dataVigencia: new Date(),
+          tipoDispositivoIncluido:
+            effect.tipoEfeito === 'inclusao' ? UnitType.artigo : null,
+          posicionamento: effect.posicionamento as InclusaoPosicionamento | null,
+          referenciaUnitId: referenciaUnit?.id ?? targetUnit?.id ?? null,
+          textoNovo: effect.textoNovo,
+          novaIdentificacao: effect.novaIdentificacao,
+          observacoes: `Detectado na importação (${effect.confianca}% confiança)`,
+          ordem,
+        },
+      });
+    }
   }
 
   private async nextNumero(tipo: ActType, ano: number): Promise<number> {
