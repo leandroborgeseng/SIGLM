@@ -9,6 +9,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +36,11 @@ jobs:
 
       - name: Prisma generate
         run: npm run db:generate --workspace=@leis-municipais/api
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+
+      - name: Validar migrations (migrate deploy)
+        run: npm run db:migrate:deploy --workspace=@leis-municipais/api
         env:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
 

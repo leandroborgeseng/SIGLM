@@ -7,9 +7,6 @@ if [ -z "$DATABASE_URL" ]; then
   exit 1
 fi
 
-echo "Aplicando migrations..."
-../../node_modules/.bin/prisma migrate deploy
-
 if [ "$RUN_SEED" = "true" ]; then
   echo "Executando seed..."
   if [ -f dist/prisma/seed.js ]; then
@@ -20,5 +17,5 @@ if [ "$RUN_SEED" = "true" ]; then
   fi
 fi
 
-echo "Iniciando API..."
-exec node dist/src/main.js
+echo "Iniciando API (migrations aplicadas via npm prestart)..."
+exec npm start

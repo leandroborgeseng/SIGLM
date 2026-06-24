@@ -5,6 +5,7 @@
   "scripts": {
     "build": "nest build && npm run build:seed",
     "build:seed": "mkdir -p dist/prisma && npx tsc prisma/seed.ts --outDir dist/prisma --module commonjs --target ES2022 --esModuleInterop --skipLibCheck",
+    "prestart": "prisma migrate deploy",
     "dev": "nest start --watch",
     "start": "node dist/src/main",
     "db:migrate": "prisma migrate dev",

@@ -64,6 +64,12 @@ RUN_SEED=false
 | `CORS_ORIGIN` | ✅ | `https://siglm.up.railway.app` — só domínio, sem `/legislacao` |
 | `RUN_SEED` | ⚠️ | `true` só no **primeiro** deploy; depois `false` |
 
+### Migrations (automático)
+
+A cada deploy/restart do **siglm-backend**, o container executa `prisma migrate deploy` **antes** de subir a API (`prestart` no `npm start`). Não é necessário rodar migration manualmente.
+
+O CI também aplica todas as migrations em Postgres efêmero a cada push na `main`, garantindo que o SQL commitado é válido.
+
 ### O que NÃO colocar no siglm-backend
 
 ```env
@@ -142,6 +148,7 @@ JWT_*                 ❌
 ## 5. Checklist pós-deploy
 
 - [ ] `GET /api/health` → OK
+- [ ] Migrations aplicadas no deploy (logs: `prisma migrate deploy`)
 - [ ] `/legislacao` lista atos
 - [ ] `/admin/login` funciona
 - [ ] `CORS_ORIGIN` = URL exata do web (https, sem barra final)
