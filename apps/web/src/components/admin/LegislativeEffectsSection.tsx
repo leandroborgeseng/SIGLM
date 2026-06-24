@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
 import { listConsolidationActs, listConsolidationUnits } from '@/lib/admin-api';
 import type { ConsolidationAct, ConsolidationUnit } from '@/lib/admin-api';
-import { HIERARCHY_TYPES, UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
+import { INCLUSION_UNIT_TYPES, UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
 import type { EffectType, InclusaoPosicionamento, LegislativeEffect, UnitType } from '@/lib/types';
 
 const EFFECT_TYPES: { value: EffectType; label: string }[] = [
@@ -172,7 +172,7 @@ export function LegislativeEffectsSection({
                         }
                       >
                         <option value="">Selecione…</option>
-                        {HIERARCHY_TYPES.map((t) => (
+                        {INCLUSION_UNIT_TYPES.map((t) => (
                           <option key={t} value={t}>
                             {UNIT_TYPE_LABELS[t]}
                           </option>
