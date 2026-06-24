@@ -13,15 +13,19 @@ export type ActSituacao =
   | 'alterado'
   | 'consolidado';
 
-export type UnitStatus = 'vigente' | 'revogada' | 'alterada' | 'incluida';
+export type UnitStatus = 'vigente' | 'revogada' | 'revogada_parcialmente' | 'alterada' | 'incluida';
 
 export type UnitType =
-  | 'titulo'
+  | 'parte'
   | 'livro'
+  | 'titulo'
+  | 'subtitulo'
   | 'capitulo'
+  | 'subcapitulo'
   | 'secao'
   | 'subsecao'
   | 'artigo'
+  | 'paragrafo_unico'
   | 'paragrafo'
   | 'inciso'
   | 'alinea'
@@ -29,6 +33,33 @@ export type UnitType =
   | 'anexo'
   | 'preambulo'
   | 'ementa';
+
+export type EffectType =
+  | 'alteracao_redacao'
+  | 'inclusao'
+  | 'revogacao_total'
+  | 'revogacao_parcial'
+  | 'renumeracao';
+
+export type InclusaoPosicionamento = 'antes_de' | 'apos' | 'dentro_de';
+
+export interface LegislativeEffect {
+  id?: string;
+  sourceUnitId: string;
+  normaAlteradaActId: string;
+  targetUnitId?: string | null;
+  tipoEfeito: EffectType;
+  dataVigencia: string;
+  observacoes?: string | null;
+  tipoDispositivoIncluido?: UnitType | null;
+  posicionamento?: InclusaoPosicionamento | null;
+  referenciaUnitId?: string | null;
+  textoNovo?: string | null;
+  redacaoUnitId?: string | null;
+  novaIdentificacao?: string | null;
+  ordem?: number;
+  appliedAt?: string | null;
+}
 
 export interface ActSummary {
   id: string;
@@ -63,6 +94,7 @@ export interface NormativeUnit {
   parentUnitId?: string | null;
   nota: string | null;
   versoes: NormativeVersion[];
+  efeitosLegislativos?: LegislativeEffect[];
 }
 
 export interface ActHistoryItem {

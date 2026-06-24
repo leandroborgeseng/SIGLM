@@ -13,7 +13,8 @@ import {
   UnitType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { AddUnitDto, CreateActDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
+import { ConsolidationService } from '../consolidation/consolidation.service';
+import { AddUnitDto, CreateActDto, SaveLegislativeEffectsDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
 import { buildActSlug, formatActCode, parseSlug } from './normative-acts.utils';
 import { defaultIdentificacao, validateUnitsHierarchy } from './unit-hierarchy.utils';
 import {
@@ -66,7 +67,10 @@ function ftsFilterParams(query: SearchActsQuery) {
 
 @Injectable()
 export class NormativeActsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly consolidation: ConsolidationService,
+  ) {}
 
   async searchPublic(query: SearchActsQuery) {
     const term = query.q ? normalizeSearchTerm(query.q) : '';
@@ -419,8 +423,16 @@ export class NormativeActsService {
       where: { unitId: { in: unitIds } },
       orderBy: { validoDe: 'desc' },
     });
+    const effects = await this.prisma.legislativeEffect.findMany({
+      where: { sourceUnitId: { in: unitIds } },
+      orderBy: [{ sourceUnitId: 'asc' }, { ordem: 'asc' }],
+    });
     const versionsByUnit = versions.reduce<Record<string, typeof versions>>((acc, v) => {
       (acc[v.unitId] ??= []).push(v);
+      return acc;
+    }, {});
+    const effectsByUnit = effects.reduce<Record<string, typeof effects>>((acc, e) => {
+      (acc[e.sourceUnitId] ??= []).push(e);
       return acc;
     }, {});
 
@@ -431,8 +443,65 @@ export class NormativeActsService {
       units: act.units.map((unit) => ({
         ...unit,
         versoes: versionsByUnit[unit.id] ?? [],
+        efeitosLegislativos: (effectsByUnit[unit.id] ?? []).map((e) => ({
+          id: e.id,
+          sourceUnitId: e.sourceUnitId,
+          normaAlteradaActId: e.normaAlteradaActId,
+          targetUnitId: e.targetUnitId,
+          tipoEfeito: e.tipoEfeito,
+          dataVigencia: e.dataVigencia.toISOString().slice(0, 10),
+          observacoes: e.observacoes,
+          tipoDispositivoIncluido: e.tipoDispositivoIncluido,
+          posicionamento: e.posicionamento,
+          referenciaUnitId: e.referenciaUnitId,
+          textoNovo: e.textoNovo,
+          redacaoUnitId: e.redacaoUnitId,
+          novaIdentificacao: e.novaIdentificacao,
+          ordem: e.ordem,
+          appliedAt: e.appliedAt?.toISOString() ?? null,
+        })),
       })),
     };
+  }
+
+  async saveLegislativeEffects(actId: string, dto: SaveLegislativeEffectsDto) {
+    const act = await this.ensureAct(actId);
+    if (act.statusPublicacao === PublicationStatus.publicado) {
+      throw new BadRequestException('Ato publicado — efeitos não podem ser alterados');
+    }
+
+    const unitIds = new Set(act.units.map((u) => u.id));
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.legislativeEffect.deleteMany({
+        where: { sourceUnit: { actId } },
+      });
+
+      for (const [i, effect] of dto.effects.entries()) {
+        if (!unitIds.has(effect.sourceUnitId)) {
+          throw new BadRequestException('Dispositivo de origem inválido para efeito legislativo');
+        }
+        await tx.legislativeEffect.create({
+          data: {
+            sourceUnitId: effect.sourceUnitId,
+            normaAlteradaActId: effect.normaAlteradaActId,
+            targetUnitId: effect.targetUnitId ?? null,
+            tipoEfeito: effect.tipoEfeito,
+            dataVigencia: new Date(effect.dataVigencia),
+            observacoes: effect.observacoes ?? null,
+            tipoDispositivoIncluido: effect.tipoDispositivoIncluido ?? null,
+            posicionamento: effect.posicionamento ?? null,
+            referenciaUnitId: effect.referenciaUnitId ?? null,
+            textoNovo: effect.textoNovo ?? null,
+            redacaoUnitId: effect.redacaoUnitId ?? null,
+            novaIdentificacao: effect.novaIdentificacao ?? null,
+            ordem: effect.ordem ?? i,
+          },
+        });
+      }
+    });
+
+    return this.getAdminById(actId);
   }
 
   async createAct(dto: CreateActDto) {
@@ -652,6 +721,7 @@ export class NormativeActsService {
       where: { id },
       data: { statusPublicacao: PublicationStatus.publicado },
     });
+    await this.consolidation.applyPendingEffectsForAct(id);
     await refreshSearchVector(this.prisma, id);
     return this.getAdminById(id);
   }

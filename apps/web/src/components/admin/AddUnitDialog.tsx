@@ -7,11 +7,12 @@ import {
   DIVISION_TYPES,
   getValidParents,
   HIERARCHY_TYPES,
+  isStructuralType,
   UNIT_TYPE_LABELS,
 } from '@/lib/unit-hierarchy';
 import type { NormativeUnit, UnitType } from '@/lib/types';
 
-type Category = 'divisao' | 'hierarquia';
+type Category = 'dispositivos' | 'divisoes';
 
 export function AddUnitDialog({
   open,
@@ -25,17 +26,19 @@ export function AddUnitDialog({
   onConfirm: (payload: {
     tipoUnidade: UnitType;
     identificacao?: string;
+    texto?: string;
     parentUnitId?: string | null;
   }) => void;
 }) {
-  const [category, setCategory] = useState<Category>('hierarquia');
+  const [category, setCategory] = useState<Category>('dispositivos');
   const [tipo, setTipo] = useState<UnitType>('artigo');
   const [identificacao, setIdentificacao] = useState('');
+  const [titulo, setTitulo] = useState('');
   const [parentUnitId, setParentUnitId] = useState<string>('');
 
-  const typeOptions = category === 'divisao' ? DIVISION_TYPES : HIERARCHY_TYPES;
-
+  const typeOptions = category === 'divisoes' ? DIVISION_TYPES : HIERARCHY_TYPES;
   const validParents = useMemo(() => getValidParents(tipo, units), [tipo, units]);
+  const isDivision = isStructuralType(tipo);
 
   if (!open) return null;
 
@@ -43,11 +46,13 @@ export function AddUnitDialog({
     onConfirm({
       tipoUnidade: tipo,
       identificacao: identificacao.trim() || undefined,
+      texto: isDivision ? titulo.trim() : undefined,
       parentUnitId: parentUnitId || null,
     });
     setIdentificacao('');
+    setTitulo('');
     setParentUnitId('');
-    setTipo(category === 'divisao' ? 'capitulo' : 'artigo');
+    setTipo(category === 'divisoes' ? 'titulo' : 'artigo');
     onClose();
   };
 
@@ -59,37 +64,37 @@ export function AddUnitDialog({
         aria-labelledby="add-unit-title"
       >
         <h3 id="add-unit-title" className="text-page-title mb-4 text-[18px]">
-          Adicionar dispositivo
+          Adicionar elemento
         </h3>
 
         <div className="mb-4 flex gap-2">
           <button
             type="button"
             onClick={() => {
-              setCategory('hierarquia');
+              setCategory('dispositivos');
               setTipo('artigo');
             }}
             className={`flex-1 rounded-[10px] border px-3 py-2 text-[13px] font-semibold ${
-              category === 'hierarquia'
+              category === 'dispositivos'
                 ? 'border-brand bg-brand-soft text-brand'
                 : 'border-line text-ink-3'
             }`}
           >
-            Hierarquia
+            Dispositivos
           </button>
           <button
             type="button"
             onClick={() => {
-              setCategory('divisao');
-              setTipo('capitulo');
+              setCategory('divisoes');
+              setTipo('titulo');
             }}
             className={`flex-1 rounded-[10px] border px-3 py-2 text-[13px] font-semibold ${
-              category === 'divisao'
+              category === 'divisoes'
                 ? 'border-brand bg-brand-soft text-brand'
                 : 'border-line text-ink-3'
             }`}
           >
-            Divisão
+            Divisões
           </button>
         </div>
 
@@ -118,7 +123,8 @@ export function AddUnitDialog({
                 <option value="">Nenhum (nível superior)</option>
                 {validParents.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.identificacao ?? UNIT_TYPE_LABELS[p.tipoUnidade]} ({UNIT_TYPE_LABELS[p.tipoUnidade]})
+                    {p.identificacao ?? UNIT_TYPE_LABELS[p.tipoUnidade]} (
+                    {UNIT_TYPE_LABELS[p.tipoUnidade]})
                   </option>
                 ))}
               </Select>
@@ -130,10 +136,23 @@ export function AddUnitDialog({
             <Input
               value={identificacao}
               onChange={(e) => setIdentificacao(e.target.value)}
-              placeholder="Ex.: Art. 5º, § 1º, I"
+              placeholder={
+                isDivision ? 'Ex.: TÍTULO II, CAPÍTULO III, ANEXO I' : 'Ex.: Art. 5º, § 1º, I, 6º-A'
+              }
               className="font-mono"
             />
           </div>
+
+          {isDivision && (
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Título</label>
+              <Input
+                value={titulo}
+                onChange={(e) => setTitulo(e.target.value)}
+                placeholder="Ex.: DISPOSIÇÕES GERAIS, DO IMPOSTO"
+              />
+            </div>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">

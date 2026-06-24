@@ -326,9 +326,23 @@ export class ImportService {
           create: estrutura.blocos.map((b, i) => ({
             tipoUnidade: b.tipo as UnitType,
             identificacao:
-              ['artigo', 'paragrafo', 'inciso', 'alinea', 'item', 'titulo', 'capitulo', 'secao'].includes(
-                b.tipo,
-              )
+              [
+                'artigo',
+                'paragrafo_unico',
+                'paragrafo',
+                'inciso',
+                'alinea',
+                'item',
+                'titulo',
+                'subtitulo',
+                'capitulo',
+                'subcapitulo',
+                'secao',
+                'subsecao',
+                'parte',
+                'livro',
+                'anexo',
+              ].includes(b.tipo)
                 ? b.tag
                 : b.tipo === 'preambulo'
                   ? null

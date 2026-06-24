@@ -1,16 +1,37 @@
 import type { NormativeUnit, UnitType } from '@/lib/types';
 
-export const DIVISION_TYPES: UnitType[] = ['titulo', 'capitulo', 'secao', 'subsecao'];
+export const DIVISION_TYPES: UnitType[] = [
+  'parte',
+  'livro',
+  'titulo',
+  'subtitulo',
+  'capitulo',
+  'subcapitulo',
+  'secao',
+  'subsecao',
+  'anexo',
+];
 
-export const HIERARCHY_TYPES: UnitType[] = ['artigo', 'paragrafo', 'inciso', 'alinea', 'item'];
+export const HIERARCHY_TYPES: UnitType[] = [
+  'artigo',
+  'paragrafo_unico',
+  'paragrafo',
+  'inciso',
+  'alinea',
+  'item',
+];
 
 export const UNIT_TYPE_LABELS: Record<UnitType, string> = {
-  titulo: 'Título',
+  parte: 'Parte',
   livro: 'Livro',
+  titulo: 'Título',
+  subtitulo: 'Subtítulo',
   capitulo: 'Capítulo',
+  subcapitulo: 'Subcapítulo',
   secao: 'Seção',
   subsecao: 'Subseção',
-  artigo: 'Artigo',
+  artigo: 'Artigo (caput)',
+  paragrafo_unico: 'Parágrafo único',
   paragrafo: 'Parágrafo',
   inciso: 'Inciso',
   alinea: 'Alínea',
@@ -20,21 +41,34 @@ export const UNIT_TYPE_LABELS: Record<UnitType, string> = {
   ementa: 'Ementa',
 };
 
+const STRUCTURAL_PARENTS: UnitType[] = [...DIVISION_TYPES];
+
 const VALID_PARENTS: Partial<Record<UnitType, UnitType[]>> = {
-  titulo: [],
-  capitulo: ['titulo'],
-  secao: ['capitulo', 'titulo'],
-  subsecao: ['secao', 'capitulo'],
-  artigo: ['titulo', 'capitulo', 'secao', 'subsecao'],
-  paragrafo: ['artigo', 'paragrafo'],
-  inciso: ['artigo', 'paragrafo'],
+  parte: [],
+  livro: ['parte'],
+  titulo: ['parte', 'livro'],
+  subtitulo: ['titulo'],
+  capitulo: ['parte', 'livro', 'titulo', 'subtitulo'],
+  subcapitulo: ['capitulo'],
+  secao: ['capitulo', 'subcapitulo', 'titulo'],
+  subsecao: ['secao'],
+  anexo: STRUCTURAL_PARENTS,
+  artigo: STRUCTURAL_PARENTS,
+  paragrafo_unico: ['artigo'],
+  paragrafo: ['artigo'],
+  inciso: ['artigo', 'paragrafo', 'paragrafo_unico'],
   alinea: ['inciso'],
   item: ['alinea', 'inciso'],
 };
 
+export function isStructuralType(tipo: UnitType): boolean {
+  return DIVISION_TYPES.includes(tipo);
+}
+
 export function isValidParent(childType: UnitType, parentType: UnitType): boolean {
   const allowed = VALID_PARENTS[childType];
   if (!allowed) return true;
+  if (allowed.length === 0) return false;
   return allowed.includes(parentType);
 }
 
@@ -56,14 +90,11 @@ export function validateUnitsHierarchy(units: NormativeUnit[]): boolean {
 }
 
 export function unitIndentClass(tipo: UnitType): string {
+  if (isStructuralType(tipo)) return 'ml-0';
   switch (tipo) {
-    case 'titulo':
-    case 'capitulo':
-    case 'secao':
-    case 'subsecao':
-      return 'ml-0';
     case 'artigo':
       return 'ml-0';
+    case 'paragrafo_unico':
     case 'paragrafo':
       return 'ml-4';
     case 'inciso':
@@ -144,10 +175,7 @@ export function dragDropBlock(
   return next.map((u, i) => ({ ...u, ordem: i }));
 }
 
-export function getValidParents(
-  tipo: UnitType,
-  units: NormativeUnit[],
-): NormativeUnit[] {
+export function getValidParents(tipo: UnitType, units: NormativeUnit[]): NormativeUnit[] {
   const allowed = VALID_PARENTS[tipo];
   if (!allowed) return [];
   if (allowed.length === 0) return [];
@@ -159,4 +187,24 @@ export function parentLabel(units: NormativeUnit[], parentUnitId: string | null 
   const parent = units.find((u) => u.id === parentUnitId);
   if (!parent) return '—';
   return parent.identificacao ?? UNIT_TYPE_LABELS[parent.tipoUnidade];
+}
+
+/** Rótulo indentado para seleção em árvore (efeitos legislativos, consolidação). */
+export function unitTreeLabel(unit: NormativeUnit, units: NormativeUnit[]): string {
+  const depth = unitParentDepth(unit, units);
+  const pad = '  '.repeat(depth);
+  const id = unit.identificacao ?? UNIT_TYPE_LABELS[unit.tipoUnidade];
+  return `${pad}${id} (${UNIT_TYPE_LABELS[unit.tipoUnidade]})`;
+}
+
+function unitParentDepth(unit: NormativeUnit, units: NormativeUnit[]): number {
+  let depth = 0;
+  let current = unit.parentUnitId;
+  const seen = new Set<string>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    depth++;
+    current = units.find((u) => u.id === current)?.parentUnitId ?? null;
+  }
+  return depth;
 }

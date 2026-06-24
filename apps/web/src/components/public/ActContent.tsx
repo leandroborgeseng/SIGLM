@@ -14,7 +14,17 @@ function noteVariant(nota: string | null): 'warn' | 'danger' | 'ok' | 'neutral' 
   return 'warn';
 }
 
-const STRUCTURAL_TYPES: UnitType[] = ['titulo', 'capitulo', 'livro', 'secao', 'subsecao'];
+const STRUCTURAL_TYPES: UnitType[] = [
+  'parte',
+  'livro',
+  'titulo',
+  'subtitulo',
+  'capitulo',
+  'subcapitulo',
+  'secao',
+  'subsecao',
+  'anexo',
+];
 
 function UnitBlock({
   unit,
@@ -69,7 +79,14 @@ function UnitBlock({
 
   if (unit.tipoUnidade === 'ementa') return null;
 
-  const showLabel = ['artigo', 'paragrafo', 'inciso', 'alinea', 'item'].includes(unit.tipoUnidade);
+  const showLabel = [
+    'artigo',
+    'paragrafo_unico',
+    'paragrafo',
+    'inciso',
+    'alinea',
+    'item',
+  ].includes(unit.tipoUnidade);
   const label = unit.identificacao ?? UNIT_TYPE_LABELS[unit.tipoUnidade];
 
   return (

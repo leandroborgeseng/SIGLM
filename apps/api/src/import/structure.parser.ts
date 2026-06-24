@@ -19,10 +19,16 @@ export interface DetectedStructure {
 
 const EMENTA_RE = /^(?:EMENTA|Ementa)[:\s]/i;
 const PREAMBULO_RE = /Faço saber|Faço saber que/i;
+const PARTE_RE = /^(PARTE)\s+(.+)$/i;
+const LIVRO_RE = /^(LIVRO)\s+(.+)$/i;
 const TITULO_RE = /^(T[IÍ]TULO)\s+(.+)$/i;
+const SUBTITULO_RE = /^(SUBT[IÍ]TULO)\s+(.+)$/i;
 const CAPITULO_RE = /^(CAP[IÍ]TULO)\s+(.+)$/i;
+const SUBCAPITULO_RE = /^(SUBCAP[IÍ]TULO)\s+(.+)$/i;
 const SECAO_RE = /^(SE[CÇ][AÃ]O)\s+(.+)$/i;
-const ARTICLE_RE = /^(?:Art\.|Artigo)\s*(\d+)\s*[°ºoO]?\s*[-–—.]?\s*(.*)$/;
+const SUBSECAO_RE = /^(SUBSE[CÇ][AÃ]O)\s+(.+)$/i;
+const ANEXO_RE = /^(ANEXO)\s+(.+)$/i;
+const ARTICLE_RE = /^(?:Art\.|Artigo)\s*(\d+[A-Za-z-]*)\s*[°ºoO]?\s*[-–—.]?\s*(.*)$/;
 const PARAGRAFO_SYMBOL_RE = /^§\s*([úuUÚ]nico|\d+)\s*[°ºoO]?\.?\s*(.*)$/i;
 const PARAGRAFO_UNICO_RE = /^Par[áa]grafo\s+[úuUÚ]nico\.?\s*(.*)$/i;
 const PARAGRAFO_NUM_RE = /^Par[áa]grafo\s+(\d+)\s*[°ºoO]?\.?\s*(.*)$/i;
@@ -47,9 +53,15 @@ export function preprocessLegalText(text: string): string {
     t = t.replace(pattern, (match, prefix: string) => `${prefix}\n`);
   };
 
+  breakBefore(/([^\n])\s+(?=PARTE\s+)/gi);
+  breakBefore(/([^\n])\s+(?=LIVRO\s+)/gi);
   breakBefore(/([^\n])\s+(?=T[IÍ]TULO\s+)/gi);
+  breakBefore(/([^\n])\s+(?=SUBT[IÍ]TULO\s+)/gi);
   breakBefore(/([^\n])\s+(?=CAP[IÍ]TULO\s+)/gi);
+  breakBefore(/([^\n])\s+(?=SUBCAP[IÍ]TULO\s+)/gi);
   breakBefore(/([^\n])\s+(?=SE[CÇ][AÃ]O\s+)/gi);
+  breakBefore(/([^\n])\s+(?=SUBSE[CÇ][AÃ]O\s+)/gi);
+  breakBefore(/([^\n])\s+(?=ANEXO\s+)/gi);
   breakBefore(/([^\n])\s+(?=(?:Art\.|Artigo)\s*\d+)/g);
   breakBefore(/([^\n])\s+(?=§\s*)/gi);
   breakBefore(/([^\n])\s+(?=Par[áa]grafo\s+)/gi);
@@ -85,8 +97,18 @@ function appendToLastBlock(blocos: StructureBlock[], line: string) {
 }
 
 function trimStackForType(stack: StackEntry[], tipo: string) {
-  const divisionOrder = ['titulo', 'capitulo', 'secao', 'subsecao'];
-  const hierarchyOrder = ['artigo', 'paragrafo', 'inciso', 'alinea', 'item'];
+  const divisionOrder = [
+    'parte',
+    'livro',
+    'titulo',
+    'subtitulo',
+    'capitulo',
+    'subcapitulo',
+    'secao',
+    'subsecao',
+    'anexo',
+  ];
+  const hierarchyOrder = ['artigo', 'paragrafo_unico', 'paragrafo', 'inciso', 'alinea', 'item'];
 
   if (divisionOrder.includes(tipo)) {
     const level = divisionOrder.indexOf(tipo);
@@ -134,10 +156,28 @@ function detectLine(line: string): { tipo: string; tag: string; texto: string } 
     return { tipo: 'preambulo', tag: 'Preâmbulo', texto: line };
   }
 
+  const parte = line.match(PARTE_RE);
+  if (parte) {
+    const { tag, texto } = divisionTag(parte[1].toUpperCase(), parte[2]);
+    return { tipo: 'parte', tag, texto };
+  }
+
+  const livro = line.match(LIVRO_RE);
+  if (livro) {
+    const { tag, texto } = divisionTag(livro[1].toUpperCase(), livro[2]);
+    return { tipo: 'livro', tag, texto };
+  }
+
   const titulo = line.match(TITULO_RE);
   if (titulo) {
     const { tag, texto } = divisionTag(titulo[1].toUpperCase(), titulo[2]);
     return { tipo: 'titulo', tag, texto };
+  }
+
+  const subtitulo = line.match(SUBTITULO_RE);
+  if (subtitulo) {
+    const { tag, texto } = divisionTag(subtitulo[1].toUpperCase(), subtitulo[2]);
+    return { tipo: 'subtitulo', tag, texto };
   }
 
   const capitulo = line.match(CAPITULO_RE);
@@ -146,10 +186,28 @@ function detectLine(line: string): { tipo: string; tag: string; texto: string } 
     return { tipo: 'capitulo', tag, texto };
   }
 
+  const subcapitulo = line.match(SUBCAPITULO_RE);
+  if (subcapitulo) {
+    const { tag, texto } = divisionTag(subcapitulo[1].toUpperCase(), subcapitulo[2]);
+    return { tipo: 'subcapitulo', tag, texto };
+  }
+
   const secao = line.match(SECAO_RE);
   if (secao) {
     const { tag, texto } = divisionTag(secao[1].toUpperCase(), secao[2]);
     return { tipo: 'secao', tag, texto };
+  }
+
+  const subsecao = line.match(SUBSECAO_RE);
+  if (subsecao) {
+    const { tag, texto } = divisionTag(subsecao[1].toUpperCase(), subsecao[2]);
+    return { tipo: 'subsecao', tag, texto };
+  }
+
+  const anexo = line.match(ANEXO_RE);
+  if (anexo) {
+    const { tag, texto } = divisionTag(anexo[1].toUpperCase(), anexo[2]);
+    return { tipo: 'anexo', tag, texto };
   }
 
   const art = line.match(ARTICLE_RE);
@@ -162,14 +220,16 @@ function detectLine(line: string): { tipo: string; tag: string; texto: string } 
   if (parSymbol) {
     const num = parSymbol[1].toLowerCase();
     const body = parSymbol[2]?.trim() ?? '';
-    const tag = num === 'único' || num === 'unico' ? '§ único' : `§ ${num}º`;
-    return { tipo: 'paragrafo', tag, texto: body || line };
+    if (num === 'único' || num === 'unico') {
+      return { tipo: 'paragrafo_unico', tag: 'Parágrafo único', texto: body || line };
+    }
+    return { tipo: 'paragrafo', tag: `§ ${num}º`, texto: body || line };
   }
 
   const parUnico = line.match(PARAGRAFO_UNICO_RE);
   if (parUnico) {
     return {
-      tipo: 'paragrafo',
+      tipo: 'paragrafo_unico',
       tag: 'Parágrafo único',
       texto: parUnico[1]?.trim() || line,
     };

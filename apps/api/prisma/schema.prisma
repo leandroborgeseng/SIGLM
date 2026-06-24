@@ -110,6 +110,7 @@ model NormativeAct {
   unitsOrigem        NormativeUnit[]   @relation("UnitOrigemAct")
   unitsAlteradoPor   NormativeUnit[]   @relation("UnitAlteradoPorAct")
   versionsOrigem     NormativeVersion[] @relation("VersionOrigemAct")
+  legislativeEffectsTarget LegislativeEffect[] @relation("EffectNormaAlterada")
 
   @@unique([tipo, numero, ano])
   @@index([tipo, ano, numero])
@@ -119,12 +120,16 @@ model NormativeAct {
 }
 
 enum UnitType {
-  titulo
+  parte
   livro
+  titulo
+  subtitulo
   capitulo
+  subcapitulo
   secao
   subsecao
   artigo
+  paragrafo_unico
   paragrafo
   inciso
   alinea
@@ -137,6 +142,7 @@ enum UnitType {
 enum UnitStatus {
   vigente
   revogada
+  revogada_parcialmente
   alterada
   incluida
 }
@@ -163,6 +169,10 @@ model NormativeUnit {
   alteradoPorAct NormativeAct?     @relation("UnitAlteradoPorAct", fields: [alteradoPorActId], references: [id])
   versions       NormativeVersion[]
   changes        NormativeChange[]
+  legislativeEffectsSource LegislativeEffect[] @relation("EffectSource")
+  legislativeEffectsTarget LegislativeEffect[] @relation("EffectTarget")
+  legislativeEffectsReferencia LegislativeEffect[] @relation("EffectReferencia")
+  legislativeEffectsRedacao LegislativeEffect[] @relation("EffectRedacao")
 
   @@index([actId, ordem])
   @@index([parentUnitId])
@@ -190,6 +200,21 @@ enum ChangeType {
   alteracao_redacao
   revogacao_parcial
   revogacao_total
+  renumeracao
+}
+
+enum EffectType {
+  alteracao_redacao
+  inclusao
+  revogacao_total
+  revogacao_parcial
+  renumeracao
+}
+
+enum InclusaoPosicionamento {
+  antes_de
+  apos
+  dentro_de
 }
 
 model NormativeChange {
@@ -214,6 +239,36 @@ model NormativeChange {
   @@index([normaAlteradaActId])
   @@index([normaAlteradoraActId])
   @@map("normative_changes")
+}
+
+model LegislativeEffect {
+  id                      String                  @id @default(uuid())
+  sourceUnitId            String                  @map("source_unit_id")
+  normaAlteradaActId      String                  @map("norma_alterada_act_id")
+  targetUnitId            String?                 @map("target_unit_id")
+  tipoEfeito              EffectType              @map("tipo_efeito")
+  dataVigencia            DateTime                @map("data_vigencia") @db.Date
+  observacoes             String?                 @db.Text
+  tipoDispositivoIncluido UnitType?               @map("tipo_dispositivo_incluido")
+  posicionamento          InclusaoPosicionamento?
+  referenciaUnitId        String?                 @map("referencia_unit_id")
+  textoNovo               String?                 @map("texto_novo") @db.Text
+  redacaoUnitId           String?                 @map("redacao_unit_id")
+  novaIdentificacao       String?                 @map("nova_identificacao")
+  ordem                   Int                     @default(0)
+  appliedAt               DateTime?               @map("applied_at")
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
+
+  sourceUnit     NormativeUnit  @relation("EffectSource", fields: [sourceUnitId], references: [id], onDelete: Cascade)
+  normaAlterada  NormativeAct   @relation("EffectNormaAlterada", fields: [normaAlteradaActId], references: [id])
+  targetUnit     NormativeUnit? @relation("EffectTarget", fields: [targetUnitId], references: [id])
+  referenciaUnit NormativeUnit? @relation("EffectReferencia", fields: [referenciaUnitId], references: [id])
+  redacaoUnit    NormativeUnit? @relation("EffectRedacao", fields: [redacaoUnitId], references: [id])
+
+  @@index([sourceUnitId])
+  @@index([normaAlteradaActId])
+  @@map("legislative_effects")
 }
 
 // ─── Arquivos e importação ───────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { ActSituacao, ActType, UnitType } from '@prisma/client';
+import { ActSituacao, ActType, EffectType, InclusaoPosicionamento, UnitType } from '@prisma/client';
 
 export class CreateActDto {
   @IsEnum(ActType)
@@ -116,6 +116,67 @@ export class UnitInputDto {
   @IsOptional()
   @IsString()
   parentUnitId?: string | null;
+}
+
+export class LegislativeEffectInputDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  sourceUnitId!: string;
+
+  @IsString()
+  normaAlteradaActId!: string;
+
+  @IsOptional()
+  @IsString()
+  targetUnitId?: string | null;
+
+  @IsEnum(EffectType)
+  tipoEfeito!: EffectType;
+
+  @IsDateString()
+  dataVigencia!: string;
+
+  @IsOptional()
+  @IsString()
+  observacoes?: string | null;
+
+  @IsOptional()
+  @IsEnum(UnitType)
+  tipoDispositivoIncluido?: UnitType | null;
+
+  @IsOptional()
+  @IsEnum(InclusaoPosicionamento)
+  posicionamento?: InclusaoPosicionamento | null;
+
+  @IsOptional()
+  @IsString()
+  referenciaUnitId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  textoNovo?: string | null;
+
+  @IsOptional()
+  @IsString()
+  redacaoUnitId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  novaIdentificacao?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  ordem?: number;
+}
+
+export class SaveLegislativeEffectsDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LegislativeEffectInputDto)
+  effects!: LegislativeEffectInputDto[];
 }
 
 export class SaveUnitsDto {

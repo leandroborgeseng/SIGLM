@@ -51,6 +51,7 @@ export class ConsolidationService {
         texto: true,
         status: true,
         ordem: true,
+        parentUnitId: true,
       },
     });
     return units;
@@ -80,7 +81,7 @@ export class ConsolidationService {
     };
   }
 
-  async apply(dto: ApplyConsolidationDto, autorId: string) {
+  async apply(dto: ApplyConsolidationDto, autorId?: string | null) {
     const { alteradora, alterada, unit, changeDate } = await this.loadContext(dto);
     const notaGerada = this.generateNote(dto.tipoAlteracao, alteradora);
     const textoAnterior = unit?.texto ?? null;
@@ -89,7 +90,7 @@ export class ConsolidationService {
       if (!dto.textoNovo?.trim()) {
         throw new BadRequestException('Texto do novo dispositivo é obrigatório');
       }
-      return this.applyInclusao(dto, alteradora, alterada, autorId, notaGerada, changeDate);
+      return this.applyInclusao(dto, alteradora, alterada, notaGerada, changeDate, autorId);
     }
 
     if (!unit) throw new BadRequestException('Dispositivo obrigatório');
@@ -102,7 +103,7 @@ export class ConsolidationService {
       if (!dto.textoNovo?.trim()) {
         throw new BadRequestException('Nova redação é obrigatória');
       }
-      return this.applyAlteracao(dto, unit, alteradora, alterada, autorId, notaGerada, changeDate);
+      return this.applyAlteracao(dto, unit, alteradora, alterada, notaGerada, changeDate, autorId);
     }
 
     return this.applyRevogacao(
@@ -110,10 +111,10 @@ export class ConsolidationService {
       unit,
       alteradora,
       alterada,
-      autorId,
       notaGerada,
       changeDate,
       textoAnterior,
+      autorId,
     );
   }
 
@@ -122,9 +123,9 @@ export class ConsolidationService {
     unit: { id: string; texto: string },
     alteradora: { id: string; dataAto: Date | null },
     alterada: { id: string },
-    autorId: string,
     notaGerada: string,
     changeDate: Date,
+    autorId?: string | null,
   ) {
     const textoAnterior = unit.texto;
 
@@ -180,10 +181,10 @@ export class ConsolidationService {
     unit: { id: string; texto: string },
     alteradora: { id: string },
     alterada: { id: string },
-    autorId: string,
     notaGerada: string,
     changeDate: Date,
     textoAnterior: string | null,
+    autorId?: string | null,
   ) {
     const tipo =
       dto.tipoAlteracao === ChangeType.revogacao_total
@@ -199,7 +200,10 @@ export class ConsolidationService {
       await tx.normativeUnit.update({
         where: { id: unit.id },
         data: {
-          status: UnitStatus.revogada,
+          status:
+            dto.tipoAlteracao === ChangeType.revogacao_total
+              ? UnitStatus.revogada
+              : UnitStatus.revogada_parcialmente,
           alteradoPorActId: alteradora.id,
           dataAlteracao: changeDate,
         },
@@ -230,9 +234,9 @@ export class ConsolidationService {
     dto: ApplyConsolidationDto,
     alteradora: { id: string; dataAto: Date | null },
     alterada: { id: string },
-    autorId: string,
     notaGerada: string,
     changeDate: Date,
+    autorId?: string | null,
   ) {
     const maxOrdem = await this.prisma.normativeUnit.aggregate({
       where: { actId: alterada.id },
@@ -340,8 +344,81 @@ export class ConsolidationService {
       case ChangeType.revogacao_parcial:
       case ChangeType.revogacao_total:
         return `Revogado pelo ${codigo}`;
+      case ChangeType.renumeracao:
+        return `Renumeração pela ${codigo}`;
       default:
         return codigo;
+    }
+  }
+
+  async applyPendingEffectsForAct(alteradoraActId: string) {
+    const alteradora = await this.prisma.normativeAct.findUnique({ where: { id: alteradoraActId } });
+    if (!alteradora) return;
+
+    const effects = await this.prisma.legislativeEffect.findMany({
+      where: {
+        sourceUnit: { actId: alteradoraActId },
+        appliedAt: null,
+      },
+      include: {
+        targetUnit: true,
+        redacaoUnit: true,
+      },
+      orderBy: [{ ordem: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    for (const effect of effects) {
+      const textoNovo =
+        effect.textoNovo?.trim() || effect.redacaoUnit?.texto?.trim() || undefined;
+      const changeType = effect.tipoEfeito as unknown as ChangeType;
+
+      if (changeType === ChangeType.renumeracao) {
+        if (!effect.targetUnitId || !effect.novaIdentificacao?.trim()) continue;
+        await this.prisma.$transaction(async (tx) => {
+          await tx.normativeUnit.update({
+            where: { id: effect.targetUnitId! },
+            data: {
+              identificacao: effect.novaIdentificacao!.trim(),
+              alteradoPorActId: alteradoraActId,
+              dataAlteracao: effect.dataVigencia,
+            },
+          });
+          await tx.normativeChange.create({
+            data: {
+              normaAlteradoraActId: alteradoraActId,
+              normaAlteradaActId: effect.normaAlteradaActId,
+              unitId: effect.targetUnitId,
+              tipoAlteracao: ChangeType.renumeracao,
+              notaGerada: effect.observacoes ?? 'Renumeração',
+              fundamento: effect.observacoes,
+              data: effect.dataVigencia,
+            },
+          });
+          await tx.legislativeEffect.update({
+            where: { id: effect.id },
+            data: { appliedAt: new Date() },
+          });
+        });
+        await this.recalculateActSituacao(effect.normaAlteradaActId);
+        continue;
+      }
+
+      const dto: ApplyConsolidationDto = {
+        normaAlteradoraActId: alteradoraActId,
+        normaAlteradaActId: effect.normaAlteradaActId,
+        unitId: effect.targetUnitId ?? undefined,
+        tipoAlteracao: changeType,
+        textoNovo,
+        fundamento: effect.observacoes ?? undefined,
+        data: effect.dataVigencia.toISOString().slice(0, 10),
+        identificacao: effect.novaIdentificacao ?? undefined,
+      };
+
+      await this.apply(dto, null);
+      await this.prisma.legislativeEffect.update({
+        where: { id: effect.id },
+        data: { appliedAt: new Date() },
+      });
     }
   }
 
@@ -352,11 +429,12 @@ export class ConsolidationService {
     if (units.length === 0) return;
 
     const revoked = units.filter((u) => u.status === UnitStatus.revogada).length;
+    const partial = units.filter((u) => u.status === UnitStatus.revogada_parcialmente).length;
     let situacao: ActSituacao = ActSituacao.vigente;
 
     if (revoked === units.length) {
       situacao = ActSituacao.revogado;
-    } else if (revoked > 0) {
+    } else if (revoked > 0 || partial > 0) {
       situacao = ActSituacao.parcialmente_revogado;
     } else if (units.some((u) => u.status === UnitStatus.alterada || u.status === UnitStatus.incluida)) {
       situacao = ActSituacao.alterado;

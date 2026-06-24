@@ -21,6 +21,7 @@ const CHANGE_TYPES = [
   { value: 'inclusao', label: 'Inclusão' },
   { value: 'revogacao_parcial', label: 'Revogação parcial' },
   { value: 'revogacao_total', label: 'Revogação total' },
+  { value: 'renumeracao', label: 'Renumeração' },
 ];
 
 export function ConsolidationPanel() {
@@ -54,7 +55,7 @@ export function ConsolidationPanel() {
     }
     listConsolidationUnits(alteradaId)
       .then((u) => {
-        setUnits(u.filter((x) => x.tipoUnidade === 'artigo'));
+        setUnits(u);
         setUnitId('');
       })
       .catch(() => toast('Erro ao carregar dispositivos', 'danger'));
@@ -102,7 +103,7 @@ export function ConsolidationPanel() {
       toast('Consolidação aplicada com sucesso', 'ok');
       if (alteradaId) {
         const u = await listConsolidationUnits(alteradaId);
-        setUnits(u.filter((x) => x.tipoUnidade === 'artigo'));
+        setUnits(u);
       }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao aplicar', 'danger');
@@ -120,6 +121,11 @@ export function ConsolidationPanel() {
       <AdminTopbar title="Consolidação normativa" />
 
       <div className="flex-1 overflow-auto p-6">
+        <div className="mb-6 rounded-[14px] border border-line bg-surface-2 px-4 py-3 text-[13px] text-ink-2">
+          Esta tela é para <strong>consulta, auditoria e correção</strong> de vínculos consolidados.
+          A consolidação principal ocorre automaticamente ao publicar normas alteradoras com efeitos
+          legislativos cadastrados no editor estruturado.
+        </div>
         <section className="mb-6 grid gap-4 rounded-[14px] border border-line bg-surface p-5 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <label className="mb-1 block text-[12px] text-ink-3">Norma alteradora</label>

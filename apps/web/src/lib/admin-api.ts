@@ -1,4 +1,4 @@
-import type { ActDetail, AdminListResponse } from './types';
+import type { ActDetail, AdminListResponse, LegislativeEffect } from './types';
 import { AuthError } from './api';
 import { getApiBaseUrl } from './api-url';
 
@@ -78,6 +78,13 @@ export function saveUnits(id: string, units: UnitPayload[], token?: string) {
   }, token);
 }
 
+export function saveLegislativeEffects(id: string, effects: LegislativeEffect[], token?: string) {
+  return adminFetch<ActDetail>(`/admin/acts/${id}/legislative-effects`, {
+    method: 'PUT',
+    body: JSON.stringify({ effects }),
+  }, token);
+}
+
 export function addUnit(
   id: string,
   payload: {
@@ -135,6 +142,7 @@ export interface ConsolidationUnit {
   texto: string;
   status: string;
   ordem: number;
+  parentUnitId?: string | null;
 }
 
 export interface ConsolidationPreview {

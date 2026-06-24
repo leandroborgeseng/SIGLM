@@ -5,5 +5,6 @@ import { ConsolidationService } from './consolidation.service';
 @Module({
   controllers: [ConsolidationController],
   providers: [ConsolidationService],
+  exports: [ConsolidationService],
 })
 export class ConsolidationModule {}

@@ -46,16 +46,16 @@ export default async function AdminAtosPage() {
           <KpiCard label="Publicados no mês" value={data.kpis.publicadosMes} />
         </div>
 
-        <div className="overflow-hidden rounded-[14px] border border-line bg-surface shadow-sm">
-          <table className="w-full text-left text-[13.5px]">
+        <div className="overflow-x-auto rounded-[14px] border border-line bg-surface shadow-sm">
+          <table className="w-full min-w-[900px] text-left text-[13.5px]">
             <thead>
               <tr className="border-b border-line-2 bg-surface-2">
-                <th className="text-section px-4 py-3">Norma</th>
-                <th className="text-section px-4 py-3">Ementa</th>
-                <th className="text-section px-4 py-3">Situação</th>
-                <th className="text-section px-4 py-3">Status</th>
-                <th className="text-section px-4 py-3">Publicação</th>
-                <th className="text-section px-4 py-3">Ações</th>
+                <th className="text-section whitespace-nowrap px-4 py-3">Norma</th>
+                <th className="text-section min-w-[200px] px-4 py-3">Ementa</th>
+                <th className="text-section whitespace-nowrap px-4 py-3">Situação</th>
+                <th className="text-section whitespace-nowrap px-4 py-3">Status</th>
+                <th className="text-section whitespace-nowrap px-4 py-3">Publicação</th>
+                <th className="text-section whitespace-nowrap px-4 py-3">Ações</th>
               </tr>
             </thead>
             <tbody>

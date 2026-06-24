@@ -16,6 +16,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import {
   AddUnitDto,
   CreateActDto,
+  SaveLegislativeEffectsDto,
   SaveUnitsDto,
   UpdateActDto,
 } from './normative-acts.dto';
@@ -114,6 +115,12 @@ export class AdminActsController {
   @RequirePermissions('acts:write')
   saveUnits(@Param('id') id: string, @Body() dto: SaveUnitsDto) {
     return this.acts.saveUnits(id, dto);
+  }
+
+  @Put(':id/legislative-effects')
+  @RequirePermissions('acts:write')
+  saveLegislativeEffects(@Param('id') id: string, @Body() dto: SaveLegislativeEffectsDto) {
+    return this.acts.saveLegislativeEffects(id, dto);
   }
 
   @Post(':id/units')

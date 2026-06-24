@@ -21,14 +21,16 @@ import {
   addUnit,
   publishAct,
   restoreUnitVersion,
+  saveLegislativeEffects,
   saveUnits,
   submitForReview,
   updateAct,
   type UnitPayload,
 } from '@/lib/admin-api';
+import { LegislativeEffectsSection } from '@/components/admin/LegislativeEffectsSection';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 import { ACT_TYPE_LABELS, cn } from '@/lib/format';
-import type { ActDetail, NormativeUnit, UnitType } from '@/lib/types';
+import type { ActDetail, LegislativeEffect, NormativeUnit, UnitType } from '@/lib/types';
 import {
   dragDropBlock,
   getValidParents,
@@ -99,21 +101,31 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     );
   };
 
+  const updateUnitEffects = (unitId: string, effects: LegislativeEffect[]) => {
+    setUnits((prev) =>
+      prev.map((u) => (u.id === unitId ? { ...u, efeitosLegislativos: effects } : u)),
+    );
+  };
+
+  const childUnitsForRedacao = (unitId: string) =>
+    units.filter((u) => u.parentUnitId === unitId);
+
   const handleAddUnit = async (payload: {
     tipoUnidade: UnitType;
     identificacao?: string;
+    texto?: string;
     parentUnitId?: string | null;
   }) => {
     try {
       const updated = await addUnit(act.id, {
         tipoUnidade: payload.tipoUnidade,
         identificacao: payload.identificacao,
-        texto: '',
+        texto: payload.texto ?? '',
         parentUnitId: payload.parentUnitId ?? null,
       });
       setAct(updated);
       setUnits(updated.units);
-      toast('Dispositivo adicionado', 'ok');
+      toast('Elemento adicionado', 'ok');
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao adicionar', 'danger');
     }
@@ -121,9 +133,13 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
 
   const persistUnits = useCallback(async () => {
     const updated = await saveUnits(act.id, unitsPayload(units));
-    setAct(updated);
-    setUnits(updated.units);
-    return updated;
+    const allEffects: LegislativeEffect[] = units.flatMap((u) =>
+      (u.efeitosLegislativos ?? []).map((e) => ({ ...e, sourceUnitId: u.id })),
+    );
+    const withEffects = await saveLegislativeEffects(act.id, allEffects);
+    setAct(withEffects);
+    setUnits(withEffects.units);
+    return withEffects;
   }, [act.id, units]);
 
   const handleSave = async () => {
@@ -357,6 +373,15 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                       rows={unit.tipoUnidade === 'artigo' ? 3 : 2}
                       className="w-full rounded-[8px] border border-line bg-surface px-3 py-2 text-[13px] focus-ring"
                     />
+                    {can('acts:write') && act.statusPublicacao !== 'publicado' && (
+                      <LegislativeEffectsSection
+                        unitId={unit.id}
+                        actId={act.id}
+                        effects={unit.efeitosLegislativos ?? []}
+                        onChange={(effects) => updateUnitEffects(unit.id, effects)}
+                        redacaoChildUnits={childUnitsForRedacao(unit.id)}
+                      />
+                    )}
                     {can('acts:write') && unit.versoes.length > 1 && (
                       <Select
                         defaultValue=""
@@ -412,7 +437,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               onClick={() => setAddDialogOpen(true)}
             >
               <Plus className="h-4 w-4" />
-              Adicionar dispositivo
+              Adicionar elemento
             </Button>
           )}
         </section>
