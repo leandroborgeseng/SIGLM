@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { UnitTreePicker } from '@/components/admin/UnitTreePicker';
 import { AdminTopbar } from '@/components/admin/AdminShell';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
@@ -15,6 +16,8 @@ import {
   type ConsolidationPreview,
   type ConsolidationUnit,
 } from '@/lib/admin-api';
+import type { InclusaoPosicionamento, UnitType } from '@/lib/types';
+import { INCLUSION_UNIT_TYPES, UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
 
 const CHANGE_TYPES = [
   { value: 'alteracao_redacao', label: 'Alteração de redação' },
@@ -22,6 +25,12 @@ const CHANGE_TYPES = [
   { value: 'revogacao_parcial', label: 'Revogação parcial' },
   { value: 'revogacao_total', label: 'Revogação total' },
   { value: 'renumeracao', label: 'Renumeração' },
+];
+
+const POSICIONAMENTO: { value: InclusaoPosicionamento; label: string }[] = [
+  { value: 'antes_de', label: 'Antes de' },
+  { value: 'apos', label: 'Após' },
+  { value: 'dentro_de', label: 'Dentro de' },
 ];
 
 export function ConsolidationPanel() {
@@ -35,10 +44,13 @@ export function ConsolidationPanel() {
 
   const [alteradoraId, setAlteradoraId] = useState('');
   const [alteradaId, setAlteradaId] = useState(searchParams.get('act') ?? '');
-  const [unitId, setUnitId] = useState('');
+  const [unitId, setUnitId] = useState<string | null>(null);
+  const [referenciaUnitId, setReferenciaUnitId] = useState<string | null>(null);
   const [tipo, setTipo] = useState('alteracao_redacao');
   const [textoNovo, setTextoNovo] = useState('');
   const [identificacao, setIdentificacao] = useState('');
+  const [tipoIncluido, setTipoIncluido] = useState<UnitType>('artigo');
+  const [posicionamento, setPosicionamento] = useState<InclusaoPosicionamento>('apos');
   const [fundamento, setFundamento] = useState('');
   const [data, setData] = useState('');
 
@@ -56,7 +68,8 @@ export function ConsolidationPanel() {
     listConsolidationUnits(alteradaId)
       .then((u) => {
         setUnits(u);
-        setUnitId('');
+        setUnitId(null);
+        setReferenciaUnitId(null);
       })
       .catch(() => toast('Erro ao carregar dispositivos', 'danger'));
   }, [alteradaId, toast]);
@@ -67,17 +80,41 @@ export function ConsolidationPanel() {
       normaAlteradaActId: alteradaId,
       tipoAlteracao: tipo,
     };
-    if (unitId) payload.unitId = unitId;
-    if (textoNovo) payload.textoNovo = textoNovo;
-    if (identificacao) payload.identificacao = identificacao;
+    if (tipo === 'inclusao') {
+      if (textoNovo) payload.textoNovo = textoNovo;
+      if (identificacao) payload.identificacao = identificacao;
+      if (referenciaUnitId) payload.referenciaUnitId = referenciaUnitId;
+      if (posicionamento) payload.posicionamento = posicionamento;
+      if (tipoIncluido) payload.tipoDispositivoIncluido = tipoIncluido;
+    } else {
+      if (unitId) payload.unitId = unitId;
+      if (textoNovo) payload.textoNovo = textoNovo;
+      if (identificacao) payload.identificacao = identificacao;
+    }
     if (fundamento) payload.fundamento = fundamento;
     if (data) payload.data = data;
     return payload;
-  }, [alteradoraId, alteradaId, tipo, unitId, textoNovo, identificacao, fundamento, data]);
+  }, [
+    alteradoraId,
+    alteradaId,
+    tipo,
+    unitId,
+    referenciaUnitId,
+    posicionamento,
+    tipoIncluido,
+    textoNovo,
+    identificacao,
+    fundamento,
+    data,
+  ]);
 
   const handlePreview = async () => {
     if (!alteradoraId || !alteradaId) {
       toast('Selecione as normas alteradora e alterada', 'warn');
+      return;
+    }
+    if (tipo === 'inclusao' && (!referenciaUnitId || !textoNovo.trim())) {
+      toast('Inclusão exige referência na árvore e texto do dispositivo', 'warn');
       return;
     }
     setLoading(true);
@@ -114,7 +151,8 @@ export function ConsolidationPanel() {
 
   const isInclusao = tipo === 'inclusao';
   const isRevogacao = tipo === 'revogacao_parcial' || tipo === 'revogacao_total';
-  const showTextoNovo = !isRevogacao;
+  const isRenumeracao = tipo === 'renumeracao';
+  const showTextoNovo = !isRevogacao && !isRenumeracao;
 
   return (
     <>
@@ -150,25 +188,6 @@ export function ConsolidationPanel() {
             </Select>
           </div>
           <div>
-            <label className="mb-1 block text-[12px] text-ink-3">Dispositivo</label>
-            {isInclusao ? (
-              <Input
-                placeholder="Ex.: Art. 6º"
-                value={identificacao}
-                onChange={(e) => setIdentificacao(e.target.value)}
-              />
-            ) : (
-              <Select value={unitId} onChange={(e) => setUnitId(e.target.value)}>
-                <option value="">Selecione...</option>
-                {units.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.identificacao ?? u.tipoUnidade} ({u.status})
-                  </option>
-                ))}
-              </Select>
-            )}
-          </div>
-          <div>
             <label className="mb-1 block text-[12px] text-ink-3">Tipo de alteração</label>
             <Select value={tipo} onChange={(e) => setTipo(e.target.value)}>
               {CHANGE_TYPES.map((t) => (
@@ -178,7 +197,66 @@ export function ConsolidationPanel() {
               ))}
             </Select>
           </div>
+          {!isInclusao && (
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Dispositivo afetado</label>
+              <UnitTreePicker
+                units={units}
+                value={unitId}
+                onChange={setUnitId}
+                placeholder="Selecione na árvore…"
+              />
+            </div>
+          )}
         </section>
+
+        {isInclusao && alteradaId && (
+          <section className="mb-6 grid gap-4 rounded-[14px] border border-line bg-surface p-5 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Tipo incluído</label>
+              <Select
+                value={tipoIncluido}
+                onChange={(e) => setTipoIncluido(e.target.value as UnitType)}
+              >
+                {INCLUSION_UNIT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {UNIT_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Posicionamento</label>
+              <Select
+                value={posicionamento}
+                onChange={(e) => setPosicionamento(e.target.value as InclusaoPosicionamento)}
+              >
+                {POSICIONAMENTO.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Identificação (ex.: Art. 6º-A)</label>
+              <Input
+                placeholder="Ex.: Art. 6º-A, CAPÍTULO III"
+                value={identificacao}
+                onChange={(e) => setIdentificacao(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[12px] text-ink-3">Dispositivo de referência</label>
+              <UnitTreePicker
+                units={units}
+                value={referenciaUnitId}
+                onChange={setReferenciaUnitId}
+              />
+            </div>
+          </section>
+        )}
 
         <section className="mb-6 grid gap-4 rounded-[14px] border border-line bg-surface p-5 sm:grid-cols-2">
           {showTextoNovo && (
@@ -191,6 +269,17 @@ export function ConsolidationPanel() {
                 onChange={(e) => setTextoNovo(e.target.value)}
                 rows={5}
                 className="w-full rounded-[10px] border border-line px-3.5 py-2 text-[13.5px] focus-ring legal-body"
+              />
+            </div>
+          )}
+          {isRenumeracao && (
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Nova identificação</label>
+              <Input
+                placeholder="Ex.: Art. 6º-A"
+                value={identificacao}
+                onChange={(e) => setIdentificacao(e.target.value)}
+                className="font-mono"
               />
             </div>
           )}

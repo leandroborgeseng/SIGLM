@@ -21,6 +21,9 @@ export const HIERARCHY_TYPES: UnitType[] = [
   'item',
 ];
 
+/** Tipos válidos para inclusão via efeito legislativo (dispositivos + divisões). */
+export const INCLUSION_UNIT_TYPES: UnitType[] = [...DIVISION_TYPES, ...HIERARCHY_TYPES];
+
 export const UNIT_TYPE_LABELS: Record<UnitType, string> = {
   parte: 'Parte',
   livro: 'Livro',

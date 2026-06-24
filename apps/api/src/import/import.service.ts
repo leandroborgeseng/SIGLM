@@ -505,10 +505,42 @@ export class ImportService {
     if (!id) return '';
     return id
       .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
       .replace(/\s+/g, ' ')
       .replace(/[°ºoO.]/g, '')
-      .replace(/^art\s*/, 'art ')
+      .replace(/^art(?:igo)?\.?\s*/, 'art ')
+      .replace(/^§\s*/, 'par ')
+      .replace(/^paragrafo\s+unico/, 'paragrafo unico')
+      .replace(/^capitulo\s+/, 'cap ')
       .trim();
+  }
+
+  private findUnitByIdent(
+    units: { id: string; identificacao: string | null }[],
+    ident: string | null,
+  ) {
+    if (!ident) return null;
+    const norm = this.normalizeIdentificacao(ident);
+    const exact = units.find((u) => this.normalizeIdentificacao(u.identificacao) === norm);
+    if (exact) return exact;
+    return (
+      units.find((u) => {
+        const uNorm = this.normalizeIdentificacao(u.identificacao);
+        return uNorm.length > 0 && (uNorm.includes(norm) || norm.includes(uNorm));
+      }) ?? null
+    );
+  }
+
+  private inferInclusionType(ident: string | null | undefined): UnitType {
+    if (!ident) return UnitType.artigo;
+    const u = ident.toUpperCase();
+    if (/CAP[ÍI]TULO/.test(u)) return UnitType.capitulo;
+    if (/T[ÍI]TULO/.test(u)) return UnitType.titulo;
+    if (/SE[ÇC][ÃA]O/.test(u)) return UnitType.secao;
+    if (/PAR[ÁA]GRAFO\s+[ÚU]NICO|§/.test(u)) return UnitType.paragrafo;
+    if (/INCISO/.test(u) || /^[IVXLCDM]+$/.test(ident.trim())) return UnitType.inciso;
+    return UnitType.artigo;
   }
 
   private async createEffectsFromImport(
@@ -541,18 +573,11 @@ export class ImportService {
       const sourceUnitId = ordemToId.get(effect.sourceBlockOrdem);
       if (!sourceUnitId) continue;
 
-      const findUnit = (ident: string | null) => {
-        if (!ident) return null;
-        const norm = this.normalizeIdentificacao(ident);
-        return (
-          normaAlterada.units.find(
-            (u) => this.normalizeIdentificacao(u.identificacao) === norm,
-          ) ?? null
-        );
-      };
-
-      const targetUnit = findUnit(effect.targetIdentificacao);
-      const referenciaUnit = findUnit(effect.referenciaIdentificacao);
+      const targetUnit = this.findUnitByIdent(normaAlterada.units, effect.targetIdentificacao);
+      const referenciaUnit = this.findUnitByIdent(
+        normaAlterada.units,
+        effect.referenciaIdentificacao ?? effect.targetIdentificacao,
+      );
 
       await this.prisma.legislativeEffect.create({
         data: {
@@ -562,7 +587,9 @@ export class ImportService {
           tipoEfeito: effect.tipoEfeito as EffectType,
           dataVigencia: new Date(),
           tipoDispositivoIncluido:
-            effect.tipoEfeito === 'inclusao' ? UnitType.artigo : null,
+            effect.tipoEfeito === 'inclusao'
+              ? this.inferInclusionType(effect.novaIdentificacao)
+              : null,
           posicionamento: effect.posicionamento as InclusaoPosicionamento | null,
           referenciaUnitId: referenciaUnit?.id ?? targetUnit?.id ?? null,
           textoNovo: effect.textoNovo,
