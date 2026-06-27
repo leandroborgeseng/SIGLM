@@ -1,9 +1,9 @@
 # SIGLM — stack completo para Coolify (Postgres + API + Web).
 # Um único recurso Docker Compose no Coolify; deploy automático via Git na branch main.
 #
-# Variáveis no Coolify (Environment) — veja .env.coolify.example:
-#   POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET, CORS_ORIGIN, NEXT_PUBLIC_API_URL
-#   RUN_SEED=true só no primeiro deploy
+# IMPORTANTE (Coolify): marque TODAS as variáveis como "Available at Buildtime"
+# (Build Variable) na aba Environment — senão o build falha na interpolação.
+# Veja COOLIFY.md e .env.coolify.example
 
 services:
   postgres:
@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-siglm}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siglm_change_me}
       POSTGRES_DB: ${POSTGRES_DB:-siglm}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -36,10 +36,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://${POSTGRES_USER:-siglm}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-siglm}?schema=public
-      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Defina JWT_REFRESH_SECRET}
-      CORS_ORIGIN: ${CORS_ORIGIN:?Defina CORS_ORIGIN}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-siglm}:${POSTGRES_PASSWORD:-siglm_change_me}@postgres:5432/${POSTGRES_DB:-siglm}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change_me_jwt_secret}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_jwt_refresh}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       RUN_SEED: ${RUN_SEED:-false}
     volumes:
       - api_uploads:/app/apps/api/uploads
@@ -63,7 +63,8 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Defina NEXT_PUBLIC_API_URL}
+        # Build-time: use NEXT_PUBLIC_API_URL ou API_URL (Coolify Build Variable)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-http://localhost:3001/api}}
     restart: unless-stopped
     depends_on:
       api:
@@ -73,8 +74,8 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:3001/api
-      API_URL: ${NEXT_PUBLIC_API_URL}
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      API_URL: ${API_URL:-${NEXT_PUBLIC_API_URL:-http://api:3001/api}}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-http://api:3001/api}}
     expose:
       - '3000'
 

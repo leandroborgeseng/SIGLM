@@ -36,7 +36,10 @@ Arquivo: [`docker-compose.coolify.yml`](docker-compose.coolify.yml)
 
 ### 2. Variáveis de ambiente
 
-Aba **Environment** — copie de [`.env.coolify.example`](.env.coolify.example):
+Aba **Environment** — copie de [`.env.coolify.example`](.env.coolify.example).
+
+> **Crítico no Coolify:** para cada variável abaixo, marque **Available at Buildtime** (Build Variable).  
+> Sem isso o deploy falha com: `required variable NEXT_PUBLIC_API_URL is missing a value`.
 
 ```env
 POSTGRES_PASSWORD=senha-forte-unica
@@ -47,16 +50,18 @@ NEXT_PUBLIC_API_URL=https://api.seudominio.gov.br/api
 RUN_SEED=true
 ```
 
-| Variável | Obrigatória | Notas |
-|----------|-------------|-------|
-| `POSTGRES_PASSWORD` | ✅ | Senha do Postgres interno |
-| `JWT_SECRET` | ✅ | Nunca commitar |
-| `JWT_REFRESH_SECRET` | ✅ | Nunca commitar |
-| `CORS_ORIGIN` | ✅ | URL do **portal** (HTTPS, sem `/` final) |
-| `NEXT_PUBLIC_API_URL` | ✅ | URL da **API** com `/api` |
-| `RUN_SEED` | ⚠️ | `true` só no **1º** deploy |
+| Variável | Build + Runtime | Notas |
+|----------|-----------------|-------|
+| `POSTGRES_PASSWORD` | ✅ ambos | Senha do Postgres interno |
+| `JWT_SECRET` | ✅ ambos | Nunca commitar |
+| `JWT_REFRESH_SECRET` | ✅ ambos | Nunca commitar |
+| `CORS_ORIGIN` | ✅ ambos | URL do **portal** (HTTPS, sem `/` final) |
+| `NEXT_PUBLIC_API_URL` | ✅ **build obrigatório** | URL da **API** com `/api` |
+| `RUN_SEED` | runtime ok | `true` só no **1º** deploy |
 
 Opcionais (padrão já ok): `POSTGRES_USER=siglm`, `POSTGRES_DB=siglm`
+
+**Ordem recomendada:** configure domínios da **api** e **web** → defina `NEXT_PUBLIC_API_URL` e `CORS_ORIGIN` com URLs finais → marque Build Variable → Deploy.
 
 ### 3. Domínios
 
@@ -130,6 +135,8 @@ Redeploy da api (ou redeploy do compose inteiro).
 
 | Problema | Solução |
 |----------|---------|
+| `NEXT_PUBLIC_API_URL is missing a value` | Defina a variável no Coolify e marque **Available at Buildtime** |
+| `POSTGRES_PASSWORD` / JWT vazios | Preencha variáveis e marque Build + Runtime |
 | API não sobe | Logs api — Postgres healthy? `POSTGRES_PASSWORD` definida? |
 | CORS | `CORS_ORIGIN` = URL exata do web (https, sem barra) |
 | Portal 500 | `NEXT_PUBLIC_API_URL` e `API_URL` apontam para API pública |
