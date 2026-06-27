@@ -1,0 +1,83 @@
+# SIGLM — stack completo para Coolify (Postgres + API + Web).
+# Um único recurso Docker Compose no Coolify; deploy automático via Git na branch main.
+#
+# Variáveis no Coolify (Environment) — veja .env.coolify.example:
+#   POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET, CORS_ORIGIN, NEXT_PUBLIC_API_URL
+#   RUN_SEED=true só no primeiro deploy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-siglm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-siglm}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-siglm} -d ${POSTGRES_DB:-siglm}',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-siglm}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-siglm}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Defina JWT_REFRESH_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:?Defina CORS_ORIGIN}
+      RUN_SEED: ${RUN_SEED:-false}
+    volumes:
+      - api_uploads:/app/apps/api/uploads
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    expose:
+      - '3001'
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Defina NEXT_PUBLIC_API_URL}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      API_INTERNAL_URL: http://api:3001/api
+      API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    expose:
+      - '3000'
+
+volumes:
+  pgdata:
+  api_uploads:

@@ -53,28 +53,17 @@ openssl rand -base64 48
 
 ---
 
-## 3. Coolify (recomendado — Compose)
+## 3. Coolify (recomendado — compose único)
 
-1. Novo **Project** → **Docker Compose**
-2. Conecte o repositório GitHub
-3. Compose file: `docker-compose.prod.yml`
-4. Crie `.env` no Coolify com:
+**Postgres + API + Web** em um recurso; deploy automático via Git. Guia completo: [`COOLIFY.md`](COOLIFY.md)
 
-```env
-POSTGRES_PASSWORD=...
-JWT_SECRET=...
-JWT_REFRESH_SECRET=...
-CORS_ORIGIN=https://leis.seudominio.gov.br
-NEXT_PUBLIC_API_URL=https://api.seudominio.gov.br/api
-RUN_SEED=true
-```
+1. Coolify → **Docker Compose** → repo **SIGLM** → `docker-compose.coolify.yml`
+2. Ative **Auto Deploy** na branch `main`
+3. Variáveis: `POSTGRES_PASSWORD`, `JWT_*`, `CORS_ORIGIN`, `NEXT_PUBLIC_API_URL`, `RUN_SEED=true` (1º deploy)
+4. Domínios: **web** (:3000) e **api** (:3001)
+5. Após seed: `RUN_SEED=false`
 
-5. Domínios:
-   - `web` → `https://leis.seudominio.gov.br`
-   - `api` → `https://api.seudominio.gov.br`
-6. Deploy. Após o primeiro deploy com seed, defina `RUN_SEED=false` e redeploy.
-
-**Login demo:** `admin@franca.sp.gov.br` / `admin123` (altere em produção).
+Não precisa de recurso Postgres separado no Coolify — o banco vem no compose.
 
 ---
 
