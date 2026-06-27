@@ -39,7 +39,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-siglm}:${POSTGRES_PASSWORD:-siglm_change_me}@postgres:5432/${POSTGRES_DB:-siglm}?schema=public
       JWT_SECRET: ${JWT_SECRET:-change_me_jwt_secret}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_jwt_refresh}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      CORS_ORIGIN: ${CORS_ORIGIN:-${SERVICE_URL_WEB:-http://localhost:3000}}
       RUN_SEED: ${RUN_SEED:-false}
     volumes:
       - api_uploads:/app/apps/api/uploads
@@ -63,8 +63,8 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        # Build-time: use NEXT_PUBLIC_API_URL ou API_URL (Coolify Build Variable)
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-http://localhost:3001/api}}
+        # Build-time: NEXT_PUBLIC_API_URL, API_URL ou SERVICE_URL_API (Coolify injeta automaticamente)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-${SERVICE_URL_API:-http://localhost:3001}/api}}
     restart: unless-stopped
     depends_on:
       api:
@@ -74,8 +74,8 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:3001/api
-      API_URL: ${API_URL:-${NEXT_PUBLIC_API_URL:-http://api:3001/api}}
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-http://api:3001/api}}
+      API_URL: ${API_URL:-${NEXT_PUBLIC_API_URL:-${SERVICE_URL_API:-http://localhost:3001}/api}}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-${SERVICE_URL_API:-http://localhost:3001}/api}}
     expose:
       - '3000'
 

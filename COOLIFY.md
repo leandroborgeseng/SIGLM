@@ -38,15 +38,18 @@ Arquivo: [`docker-compose.coolify.yml`](docker-compose.coolify.yml)
 
 Aba **Environment** — copie de [`.env.coolify.example`](.env.coolify.example).
 
-> **Crítico no Coolify:** para cada variável abaixo, marque **Available at Buildtime** (Build Variable).  
-> Sem isso o deploy falha com: `required variable NEXT_PUBLIC_API_URL is missing a value`.
+> **Crítico no Coolify:** marque **Available at Buildtime** (Build Variable) em `POSTGRES_PASSWORD`, `JWT_SECRET`, `JWT_REFRESH_SECRET` e, se definir manualmente, `NEXT_PUBLIC_API_URL` e `CORS_ORIGIN`.
+>
+> **Não use texto placeholder** (ex.: `Defina JWT_SECRET`) — o deploy aceita, mas a API não funciona de verdade.
+
+**URLs automáticas:** se você configurou domínios no Coolify, `SERVICE_URL_API` e `SERVICE_URL_WEB` são injetados automaticamente. O compose usa isso como fallback — `NEXT_PUBLIC_API_URL` e `CORS_ORIGIN` **podem ficar vazios** na primeira tentativa (desde que api e web tenham domínio/sslip.io).
 
 ```env
 POSTGRES_PASSWORD=senha-forte-unica
 JWT_SECRET=...          # openssl rand -base64 48
 JWT_REFRESH_SECRET=...  # openssl rand -base64 48
-CORS_ORIGIN=https://legislacao.seudominio.gov.br
-NEXT_PUBLIC_API_URL=https://api.seudominio.gov.br/api
+CORS_ORIGIN=            # opcional se SERVICE_URL_WEB existir
+NEXT_PUBLIC_API_URL=    # opcional se SERVICE_URL_API existir (compose adiciona /api)
 RUN_SEED=true
 ```
 
@@ -135,7 +138,10 @@ Redeploy da api (ou redeploy do compose inteiro).
 
 | Problema | Solução |
 |----------|---------|
-| `NEXT_PUBLIC_API_URL is missing a value` | Defina a variável no Coolify e marque **Available at Buildtime** |
+| `No space left on device` | **Libere disco no servidor** (veja abaixo) antes de redeploy |
+| Build web falha (`npm run build`) | Disco cheio ou RAM baixa — libere espaço; api precisa ~2 GB RAM no build |
+| `NEXT_PUBLIC_API_URL is missing a value` | Defina a variável ou configure domínio da **api** (Coolify injeta `SERVICE_URL_API`) |
+| Variáveis com `Defina JWT_SECRET` etc. | Substitua por valores reais (`openssl rand -base64 48`) |
 | `POSTGRES_PASSWORD` / JWT vazios | Preencha variáveis e marque Build + Runtime |
 | API não sobe | Logs api — Postgres healthy? `POSTGRES_PASSWORD` definida? |
 | CORS | `CORS_ORIGIN` = URL exata do web (https, sem barra) |
@@ -143,6 +149,26 @@ Redeploy da api (ou redeploy do compose inteiro).
 | Uploads sumiram | Volume `api_uploads` deve persistir no Coolify |
 | Build web falha | Veja logs — geralmente variável faltando |
 | OCR lento | Aumente RAM do container **api** |
+
+### Disco cheio no servidor (`No space left on device`)
+
+Builds Docker consomem muito espaço. No **WEBX-PMF-SRV01** (SSH), execute com cuidado:
+
+```bash
+# Ver uso
+df -h / /data /var/lib/docker
+
+# Remover imagens/containers/build cache não usados
+sudo docker system df
+sudo docker builder prune -af
+sudo docker image prune -af
+sudo docker container prune -f
+
+# Deploys antigos do Coolify (se /data estiver cheio)
+sudo du -sh /data/coolify/* | sort -h | tail -20
+```
+
+Depois de liberar **pelo menos 5–10 GB**, redeploy no Coolify.
 
 ---
 

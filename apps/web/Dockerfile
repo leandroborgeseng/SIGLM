@@ -9,8 +9,9 @@ RUN npm ci --workspace=@leis-municipais/web --include-workspace-root
 
 COPY apps/web ./apps/web
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:3001/api
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
+ENV NODE_OPTIONS=--max-old-space-size=2048
 
 RUN npm run build --workspace=@leis-municipais/web
 
@@ -18,8 +19,8 @@ FROM base AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
-ARG NEXT_PUBLIC_API_URL=http://localhost:3001/api
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
 
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
