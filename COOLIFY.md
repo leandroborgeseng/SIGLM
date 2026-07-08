@@ -96,6 +96,18 @@ RUN_SEED=false
 
 Redeploy da api (ou redeploy do compose inteiro).
 
+### Redeploy rápido (demo atual)
+
+Confirme no Coolify → **Environment** antes do push:
+
+```env
+RUN_SEED=true
+NEXT_PUBLIC_STAGING_GATE=true          # Build Variable
+STAGING_ACCESS_PASSWORD=siglm-demo
+```
+
+Push na `main` dispara rebuild automático (Auto Deploy). Após seed OK nos logs da api, altere `RUN_SEED=false` e redeploy.
+
 ---
 
 ## Ciclo de manutenção (dia a dia)
