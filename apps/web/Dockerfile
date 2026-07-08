@@ -11,8 +11,8 @@ COPY apps/web ./apps/web
 
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
-ARG NEXT_PUBLIC_STAGING_GATE=false
-ENV NEXT_PUBLIC_STAGING_GATE=${NEXT_PUBLIC_STAGING_GATE}
+ARG NEXT_PUBLIC_STAGING_GATE
+ENV NEXT_PUBLIC_STAGING_GATE=${NEXT_PUBLIC_STAGING_GATE:-false}
 ENV NODE_OPTIONS=--max-old-space-size=2048
 
 RUN npm run build --workspace=@leis-municipais/web
@@ -21,8 +21,8 @@ FROM base AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
+ARG NEXT_PUBLIC_STAGING_GATE
+ENV NEXT_PUBLIC_STAGING_GATE=${NEXT_PUBLIC_STAGING_GATE:-false}
 
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs

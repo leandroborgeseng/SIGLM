@@ -28,15 +28,19 @@ export default async function AcessoDemoPage({
         </div>
 
         <form action={unlockStaging} className="space-y-4">
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            label="Senha de acesso"
-            placeholder="Senha fornecida pela equipe"
-            required
-            autoFocus
-          />
+          <div>
+            <label htmlFor="password" className="mb-1.5 block text-[13px] font-medium text-ink-2">
+              Senha de acesso
+            </label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              placeholder="Senha fornecida pela equipe"
+              required
+              autoFocus
+            />
+          </div>
           {erro ? (
             <p className="text-[13px] font-medium text-danger" role="alert">
               {erro}
