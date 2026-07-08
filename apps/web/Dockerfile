@@ -11,6 +11,8 @@ COPY apps/web ./apps/web
 
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
+ARG NEXT_PUBLIC_STAGING_GATE=false
+ENV NEXT_PUBLIC_STAGING_GATE=${NEXT_PUBLIC_STAGING_GATE}
 ENV NODE_OPTIONS=--max-old-space-size=2048
 
 RUN npm run build --workspace=@leis-municipais/web

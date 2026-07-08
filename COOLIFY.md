@@ -120,6 +120,39 @@ Redeploy da api (ou redeploy do compose inteiro).
 
 **Troque a senha antes de produção formal.**
 
+### Atos de exemplo (após seed)
+
+| Ato | URL no portal |
+|-----|----------------|
+| LC 312/2024 — Código Tributário | `/legislacao/lei-complementar/2024/312` |
+| Lei 4.987/2026 — altera LC 312 | `/legislacao/lei/2026/4987` |
+| Decreto 12.450/2026 — revoga art. 4º | `/legislacao/decreto/2026/12450` |
+
+---
+
+## Ambiente de demonstração (senha no portal)
+
+Para mostrar o sistema a terceiros sem deixar o portal aberto:
+
+1. **Popule o banco** (se ainda vazio): `RUN_SEED=true` → Deploy → depois `RUN_SEED=false`
+2. No Coolify → **Environment**:
+
+```env
+NEXT_PUBLIC_STAGING_GATE=true
+STAGING_ACCESS_PASSWORD=siglm-demo
+```
+
+| Variável | Build Variable | Função |
+|----------|----------------|--------|
+| `NEXT_PUBLIC_STAGING_GATE` | ✅ sim | Ativa tela `/acesso` (rebuild) |
+| `STAGING_ACCESS_PASSWORD` | não | Senha da demo (runtime) |
+
+3. **Redeploy** (rebuild do **web** para aplicar a flag)
+4. Acesse o portal → senha `siglm-demo` (ou a que você definiu)
+5. Painel admin: `admin@franca.sp.gov.br` / `admin123`
+
+Para **produção formal**: `NEXT_PUBLIC_STAGING_GATE=false` e rebuild.
+
 ---
 
 ## Checklist pós-deploy

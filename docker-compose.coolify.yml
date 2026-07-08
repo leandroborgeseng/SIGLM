@@ -65,6 +65,7 @@ services:
       args:
         # Build-time: NEXT_PUBLIC_API_URL, API_URL ou SERVICE_URL_API (Coolify injeta automaticamente)
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-${SERVICE_URL_API:-http://localhost:3001}/api}}
+        NEXT_PUBLIC_STAGING_GATE: ${NEXT_PUBLIC_STAGING_GATE:-false}
     restart: unless-stopped
     depends_on:
       api:
@@ -76,6 +77,8 @@ services:
       API_INTERNAL_URL: http://api:3001/api
       API_URL: ${API_URL:-${NEXT_PUBLIC_API_URL:-${SERVICE_URL_API:-http://localhost:3001}/api}}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-${API_URL:-${SERVICE_URL_API:-http://localhost:3001}/api}}
+      NEXT_PUBLIC_STAGING_GATE: ${NEXT_PUBLIC_STAGING_GATE:-false}
+      STAGING_ACCESS_PASSWORD: ${STAGING_ACCESS_PASSWORD:-}
     expose:
       - '3000'
 
