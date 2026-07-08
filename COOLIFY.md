@@ -188,7 +188,9 @@ Para **produção formal**: `NEXT_PUBLIC_STAGING_GATE=false` e rebuild.
 | `NEXT_PUBLIC_API_URL is missing a value` | Defina a variável ou configure domínio da **api** (Coolify injeta `SERVICE_URL_API`) |
 | Variáveis com `Defina JWT_SECRET` etc. | Substitua por valores reais (`openssl rand -base64 48`) |
 | `POSTGRES_PASSWORD` / JWT vazios | Preencha variáveis e marque Build + Runtime |
-| API não sobe | Logs api — Postgres healthy? `POSTGRES_PASSWORD` definida? |
+| Login admin falha / "E-mail ou senha incorretos" | Veja seção **Autenticação** abaixo |
+| `users: 0` em `/api/health` | `RUN_SEED=true` → redeploy → `RUN_SEED=false` |
+| `db: error` em `/api/health` | `POSTGRES_PASSWORD` errada ou volume `pgdata` com senha antiga |
 | CORS | `CORS_ORIGIN` = URL exata do web (https, sem barra) |
 | Portal 500 | `NEXT_PUBLIC_API_URL` e `API_URL` apontam para API pública |
 | Uploads sumiram | Volume `api_uploads` deve persistir no Coolify |
@@ -214,6 +216,59 @@ sudo du -sh /data/coolify/* | sort -h | tail -20
 ```
 
 Depois de liberar **pelo menos 5–10 GB**, redeploy no Coolify.
+
+### Autenticação / banco de dados
+
+O login admin **depende do banco** populado pelo seed. Sem variáveis corretas no Coolify, a API sobe mas o login falha.
+
+**1. Cole no Coolify → Environment** (substitua os valores):
+
+```env
+POSTGRES_PASSWORD=SuaSenhaForte123!
+JWT_SECRET=cole-aqui-output-de-openssl-rand-base64-48
+JWT_REFRESH_SECRET=cole-outro-output-diferente
+RUN_SEED=true
+NEXT_PUBLIC_STAGING_GATE=true
+STAGING_ACCESS_PASSWORD=siglm-demo
+```
+
+| Variável | Build Variable? | Obrigatória |
+|----------|-----------------|-------------|
+| `POSTGRES_PASSWORD` | ✅ sim | Sim — **não mude** depois do 1º deploy (volume `pgdata` guarda a senha inicial) |
+| `JWT_SECRET` | ✅ sim | Sim — nunca use `Defina JWT_SECRET` |
+| `JWT_REFRESH_SECRET` | ✅ sim | Sim |
+| `RUN_SEED` | não | `true` no 1º deploy com dados demo |
+| `NEXT_PUBLIC_STAGING_GATE` | ✅ sim | Demo com senha no portal |
+| `STAGING_ACCESS_PASSWORD` | não | Senha da tela `/acesso` |
+
+`CORS_ORIGIN` e `NEXT_PUBLIC_API_URL` podem ficar vazios se os domínios **web** e **api** já estiverem configurados no Coolify.
+
+**2. Diagnóstico rápido** (troque pela URL da sua API):
+
+```bash
+curl -s https://SUA-API.sslip.io/api/health
+# Esperado: {"status":"ok","db":"ok","users":1,...}
+
+curl -s https://SUA-API.sslip.io/api/stats
+# Esperado: {"acts":3,"units":...,"users":1}
+```
+
+- `db: "error"` → senha do Postgres incorreta (resetar volume `pgdata` ou usar a senha original)
+- `users: 0` → seed não rodou: `RUN_SEED=true` e redeploy
+- Portal: teste `https://SEU-WEB.sslip.io/api/backend/health` — deve retornar o mesmo JSON
+
+**3. Login após seed OK**
+
+| Campo | Valor |
+|-------|-------|
+| E-mail | `admin@franca.sp.gov.br` |
+| Senha | `admin123` |
+
+**4. Se mudou `POSTGRES_PASSWORD` depois do 1º deploy**
+
+O Postgres **ignora** a nova senha (dados no volume). Opções:
+- Voltar à senha usada na 1ª subida, **ou**
+- Apagar volume `pgdata` no Coolify (apaga todos os dados) e redeploy com senha nova + `RUN_SEED=true`
 
 ---
 

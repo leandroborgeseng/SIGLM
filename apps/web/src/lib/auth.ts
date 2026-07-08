@@ -36,6 +36,11 @@ export async function login(email: string, senha: string): Promise<LoginResponse
     body: JSON.stringify({ email, senha }),
   });
   if (!res.ok) {
+    if (res.status === 502) {
+      throw new Error(
+        'API indisponível. Verifique no Coolify se o serviço api está saudável e se as variáveis POSTGRES_PASSWORD e JWT_* estão definidas.',
+      );
+    }
     const err = await res.json().catch(() => ({}));
     const msg = Array.isArray(err.message) ? err.message[0] : err.message;
     throw new Error(msg ?? 'E-mail ou senha incorretos');
