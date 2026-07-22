@@ -97,7 +97,21 @@ async function seedRolesAndUsers() {
   return prisma.user.findUniqueOrThrow({ where: { email: 'admin@franca.sp.gov.br' } });
 }
 
-async function seedNormativeActs(adminId: string) {
+async function seedOriginOrgs() {
+  const nomes = ['Câmara Municipal de Franca', 'Prefeitura Municipal de Franca'];
+  const byName: Record<string, string> = {};
+  for (const nome of nomes) {
+    const org = await prisma.originOrg.upsert({
+      where: { nome },
+      update: { ativo: true },
+      create: { nome, ativo: true },
+    });
+    byName[nome] = org.id;
+  }
+  return byName;
+}
+
+async function seedNormativeActs(adminId: string, organs: Record<string, string>) {
   // Limpa dados normativos para re-seed idempotente em dev
   await prisma.normativeChange.deleteMany();
   await prisma.normativeVersion.deleteMany();
@@ -119,6 +133,7 @@ async function seedNormativeActs(adminId: string) {
       palavrasChave: ['tributação', 'ISS', 'IPTU', 'código tributário', 'franca'],
       situacao: ActSituacao.consolidado,
       orgaoOrigem: 'Câmara Municipal de Franca',
+      orgaoOrigemId: organs['Câmara Municipal de Franca'],
       autoridadeSignataria: 'Prefeito Municipal',
       slug: 'lei-complementar/2024/312',
       statusPublicacao: PublicationStatus.publicado,
@@ -140,6 +155,7 @@ async function seedNormativeActs(adminId: string) {
       palavrasChave: ['alteração', 'ISS', 'código tributário'],
       situacao: ActSituacao.vigente,
       orgaoOrigem: 'Câmara Municipal de Franca',
+      orgaoOrigemId: organs['Câmara Municipal de Franca'],
       autoridadeSignataria: 'Prefeito Municipal',
       slug: 'lei/2026/4987',
       statusPublicacao: PublicationStatus.publicado,
@@ -159,6 +175,7 @@ async function seedNormativeActs(adminId: string) {
       palavrasChave: ['decreto', 'regulamentação', 'revogação'],
       situacao: ActSituacao.vigente,
       orgaoOrigem: 'Prefeitura Municipal de Franca',
+      orgaoOrigemId: organs['Prefeitura Municipal de Franca'],
       autoridadeSignataria: 'Prefeito Municipal',
       slug: 'decreto/2026/12450',
       statusPublicacao: PublicationStatus.publicado,
@@ -458,7 +475,8 @@ async function main() {
   console.log('🌱 Seed LeisMunicipais...');
 
   const admin = await seedRolesAndUsers();
-  const acts = await seedNormativeActs(admin.id);
+  const organs = await seedOriginOrgs();
+  const acts = await seedNormativeActs(admin.id, organs);
   await seedSearchVectors();
 
   console.log('✅ Seed concluído:');

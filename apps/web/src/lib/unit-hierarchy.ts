@@ -40,7 +40,8 @@ export const UNIT_TYPE_LABELS: Record<UnitType, string> = {
   alinea: 'Alínea',
   item: 'Item',
   anexo: 'Anexo',
-  preambulo: 'Preâmbulo',
+  preambulo: 'Preâmbulo / considerandos introdutórios',
+  considerando: 'Considerando',
   ementa: 'Ementa',
 };
 

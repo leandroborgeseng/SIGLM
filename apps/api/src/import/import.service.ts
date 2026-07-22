@@ -275,7 +275,9 @@ export class ImportService {
       numero?: number;
       ano?: number;
       ementa?: string;
+      dataAto?: string;
       orgaoOrigem?: string;
+      orgaoOrigemId?: string;
       efeitosAceitos?: string[];
     },
   ) {
@@ -301,6 +303,7 @@ export class ImportService {
         tipo?: string | null;
         numero?: number | null;
         ano?: number | null;
+        dataAto?: string | null;
         ementa?: string | null;
       };
       efeitosSugeridos?: SuggestedLegislativeEffect[];
@@ -310,10 +313,27 @@ export class ImportService {
     const detected = estrutura.metadados;
     const ementa =
       meta.ementa ?? detected?.ementa ?? ementaBlock?.texto ?? 'Ementa importada';
-    const ano = meta.ano ?? detected?.ano ?? new Date().getFullYear();
+    const dataAtoRaw = meta.dataAto ?? detected?.dataAto ?? null;
+    const dataAto = dataAtoRaw ? new Date(dataAtoRaw) : undefined;
+    const ano =
+      meta.ano ??
+      detected?.ano ??
+      (dataAto && !Number.isNaN(dataAto.getTime()) ? dataAto.getUTCFullYear() : new Date().getFullYear());
     const tipo = (meta.tipo ?? detected?.tipo ?? ActType.lei) as ActType;
     const numero =
       meta.numero ?? detected?.numero ?? (await this.nextNumero(tipo, ano));
+
+    let orgaoOrigem = meta.orgaoOrigem ?? 'Importação';
+    let orgaoOrigemId: string | undefined;
+    if (meta.orgaoOrigemId) {
+      const org = await this.prisma.originOrg.findUnique({ where: { id: meta.orgaoOrigemId } });
+      if (org) {
+        orgaoOrigemId = org.id;
+        orgaoOrigem = org.nome;
+      }
+    }
+
+    const unitBlocks = estrutura.blocos.filter((b) => b.tipo !== 'ementa');
 
     const act = await this.prisma.normativeAct.create({
       data: {
@@ -321,34 +341,37 @@ export class ImportService {
         numero,
         ano,
         ementa,
-        orgaoOrigem: meta.orgaoOrigem ?? 'Importação',
+        dataAto,
+        orgaoOrigem,
+        orgaoOrigemId,
         slug: buildActSlug(tipo, ano, numero),
         statusPublicacao: PublicationStatus.rascunho,
         units: {
-          create: estrutura.blocos.map((b, i) => ({
+          create: unitBlocks.map((b, i) => ({
             tipoUnidade: b.tipo as UnitType,
-            identificacao:
-              [
-                'artigo',
-                'paragrafo_unico',
-                'paragrafo',
-                'inciso',
-                'alinea',
-                'item',
-                'titulo',
-                'subtitulo',
-                'capitulo',
-                'subcapitulo',
-                'secao',
-                'subsecao',
-                'parte',
-                'livro',
-                'anexo',
-              ].includes(b.tipo)
-                ? b.tag
-                : b.tipo === 'preambulo'
-                  ? null
-                  : b.tag,
+            identificacao: [
+              'artigo',
+              'paragrafo_unico',
+              'paragrafo',
+              'inciso',
+              'alinea',
+              'item',
+              'titulo',
+              'subtitulo',
+              'capitulo',
+              'subcapitulo',
+              'secao',
+              'subsecao',
+              'parte',
+              'livro',
+              'anexo',
+            ].includes(b.tipo)
+              ? b.tag
+              : b.tipo === 'preambulo'
+                ? 'Preâmbulo'
+                : b.tipo === 'considerando'
+                  ? 'Considerando'
+                  : null,
             texto: b.texto,
             ordem: i,
           })),
@@ -357,17 +380,21 @@ export class ImportService {
       include: { units: { orderBy: { ordem: 'asc' } } },
     });
 
+    // Remapeia parentOrdem dos blocos filtrados (sem ementa)
+    const oldToNewOrdem = new Map(unitBlocks.map((b, i) => [b.ordem, i]));
     const ordemToId = new Map(act.units.map((u) => [u.ordem, u.id]));
-    for (const block of estrutura.blocos) {
+    for (const block of unitBlocks) {
       if (block.parentOrdem == null) continue;
-      const unitId = ordemToId.get(block.ordem);
-      const parentId = ordemToId.get(block.parentOrdem);
-      if (unitId && parentId) {
-        await this.prisma.normativeUnit.update({
-          where: { id: unitId },
-          data: { parentUnitId: parentId },
-        });
-      }
+      const newOrdem = oldToNewOrdem.get(block.ordem);
+      const newParent = oldToNewOrdem.get(block.parentOrdem);
+      if (newOrdem == null || newParent == null) continue;
+      const unitId = ordemToId.get(newOrdem);
+      const parentId = ordemToId.get(newParent);
+      if (!unitId || !parentId) continue;
+      await this.prisma.normativeUnit.update({
+        where: { id: unitId },
+        data: { parentUnitId: parentId },
+      });
     }
 
     await this.createEffectsFromImport(

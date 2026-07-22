@@ -4,6 +4,7 @@ export interface DetectedActMetadata {
   tipo: string | null;
   numero: number | null;
   ano: number | null;
+  dataAto: string | null;
   ementa: string | null;
   tituloCompleto: string | null;
   confianca: number;
@@ -19,9 +20,25 @@ const TYPE_KEYWORDS: { tipo: string; pattern: RegExp }[] = [
 ];
 
 const FULL_TITLE_RE =
-  /\b(LEI\s+COMPLEMENTAR|INSTRU[ÇC][ÃA]O\s+NORMATIVA|LEI|DECRETO|PORTARIA|RESOLU[ÇC][ÃA]O)\s+N[º°oO.]?\s*([\d.]+)\s*(?:[,/]\s*)?(?:DE\s+\d{1,2}\s+DE\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç]+\s+DE\s+)?(\d{4})?/i;
+  /\b(LEI\s+COMPLEMENTAR|INSTRU[ÇC][ÃA]O\s+NORMATIVA|LEI|DECRETO|PORTARIA|RESOLU[ÇC][ÃA]O)\s+N[º°oO.]?\s*([\d.]+)\s*,?\s*(?:DE\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç]+)\s+DE\s+(\d{4})|\/?\s*(\d{4}))?/i;
 
-const EMENTA_RE = /(?:^|\n)\s*EMENTA\s*:?\s*(.+?)(?=\n\s*(?:Art(?:igo)?\.|§|T[IÍ]TULO|CAP[IÍ]TULO|Faço saber|$))/is;
+const EMENTA_RE =
+  /(?:^|\n)\s*EMENTA\s*:?\s*(.+?)(?=\n\s*(?:Art(?:igo)?\.|§|T[IÍ]TULO|CAP[IÍ]TULO|CONSIDERANDO|Faço saber|$))/is;
+
+const MONTHS: Record<string, number> = {
+  janeiro: 1,
+  fevereiro: 2,
+  marco: 3,
+  abril: 4,
+  maio: 5,
+  junho: 6,
+  julho: 7,
+  agosto: 8,
+  setembro: 9,
+  outubro: 10,
+  novembro: 11,
+  dezembro: 12,
+};
 
 function parseNumero(raw: string): number | null {
   const digits = raw.replace(/\./g, '').replace(/\D/g, '');
@@ -38,6 +55,18 @@ function tipoFromKeyword(keyword: string): string {
   if (normalized.startsWith('PORTARIA')) return 'portaria';
   if (normalized.startsWith('RESOLU')) return 'resolucao';
   return 'lei';
+}
+
+function parseDataExtenso(day: string, monthName: string, year: string): string | null {
+  const key = monthName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const m = MONTHS[key];
+  const d = parseInt(day, 10);
+  const y = parseInt(year, 10);
+  if (!m || !d || !y) return null;
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
 function extractFromFilename(filename: string): Partial<DetectedActMetadata> {
@@ -110,6 +139,11 @@ function extractYear(header: string): number | null {
   return years[0] ?? null;
 }
 
+/** Detecta se a linha é só o título formal (não deve virar unidade estruturada). */
+export function isFormalTitleLine(line: string): boolean {
+  return FULL_TITLE_RE.test(line.trim()) && line.trim().length < 180;
+}
+
 export function extractActMetadata(
   text: string,
   filename?: string,
@@ -120,6 +154,7 @@ export function extractActMetadata(
   let tipo: string | null = null;
   let numero: number | null = null;
   let ano: number | null = null;
+  let dataAto: string | null = null;
   let tituloCompleto: string | null = null;
 
   const ementa = extractEmenta(text, blocos);
@@ -130,7 +165,13 @@ export function extractActMetadata(
     tituloCompleto = titleMatch[0].replace(/\s+/g, ' ').trim();
     tipo = tipoFromKeyword(titleMatch[1]);
     numero = parseNumero(titleMatch[2]);
-    if (titleMatch[3]) ano = parseInt(titleMatch[3], 10);
+    if (titleMatch[3] && titleMatch[4] && titleMatch[5]) {
+      dataAto = parseDataExtenso(titleMatch[3], titleMatch[4], titleMatch[5]);
+      ano = parseInt(titleMatch[5], 10);
+      confianca += 10;
+    } else if (titleMatch[6]) {
+      ano = parseInt(titleMatch[6], 10);
+    }
     confianca += 45;
   } else {
     for (const { tipo: t, pattern } of TYPE_KEYWORDS) {
@@ -178,6 +219,7 @@ export function extractActMetadata(
     tipo,
     numero,
     ano,
+    dataAto,
     ementa,
     tituloCompleto,
     confianca: Math.min(100, confianca),

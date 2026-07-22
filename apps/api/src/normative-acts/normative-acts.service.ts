@@ -15,7 +15,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ConsolidationService } from '../consolidation/consolidation.service';
 import { AddUnitDto, CreateActDto, SaveLegislativeEffectsDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
-import { buildActSlug, formatActCode, parseSlug } from './normative-acts.utils';
+import { buildActSlug, formatActCode, formatFormalTitle, parseSlug } from './normative-acts.utils';
 import { defaultIdentificacao, validateUnitsHierarchy } from './unit-hierarchy.utils';
 import {
   buildFtsFilterSql,
@@ -279,6 +279,7 @@ export class NormativeActsService {
     const act = await this.prisma.normativeAct.findFirst({
       where: { slug, statusPublicacao: PublicationStatus.publicado },
       include: {
+        orgao: true,
         units: { orderBy: { ordem: 'asc' } },
         attachments: true,
         changesAsAlterada: {
@@ -336,7 +337,9 @@ export class NormativeActsService {
 
     return {
       ...act,
+      orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
+      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
       units: unitsWithNotes,
       history,
       attachments: act.attachments.map((a) => ({
@@ -347,6 +350,7 @@ export class NormativeActsService {
         downloadUrl: `/public/attachments/${a.id}/file`,
       })),
       changesAsAlterada: undefined,
+      orgao: undefined,
     };
   }
 
@@ -412,6 +416,7 @@ export class NormativeActsService {
     const act = await this.prisma.normativeAct.findUnique({
       where: { id },
       include: {
+        orgao: true,
         units: { orderBy: { ordem: 'asc' } },
         attachments: true,
       },
@@ -438,7 +443,9 @@ export class NormativeActsService {
 
     return {
       ...act,
+      orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
+      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
       hierarchyValid: this.validateHierarchy(act.units),
       units: act.units.map((unit) => ({
         ...unit,
@@ -504,6 +511,22 @@ export class NormativeActsService {
     return this.getAdminById(actId);
   }
 
+  private async resolveOrgaoFields(dto: {
+    orgaoOrigemId?: string;
+    orgaoOrigem?: string;
+  }): Promise<{ orgaoOrigemId?: string | null; orgaoOrigem?: string | null }> {
+    if (dto.orgaoOrigemId) {
+      const org = await this.prisma.originOrg.findUnique({ where: { id: dto.orgaoOrigemId } });
+      if (!org) throw new BadRequestException('Órgão de origem inválido');
+      if (!org.ativo) throw new BadRequestException('Órgão de origem inativo');
+      return { orgaoOrigemId: org.id, orgaoOrigem: org.nome };
+    }
+    if (dto.orgaoOrigem !== undefined) {
+      return { orgaoOrigem: dto.orgaoOrigem || null, orgaoOrigemId: null };
+    }
+    return {};
+  }
+
   async createAct(dto: CreateActDto) {
     const slug = buildActSlug(dto.tipo, dto.ano, dto.numero);
     const existing = await this.prisma.normativeAct.findFirst({
@@ -513,53 +536,56 @@ export class NormativeActsService {
       throw new ConflictException('Já existe um ato com este tipo, número e ano');
     }
 
+    const orgaoFields = await this.resolveOrgaoFields(dto);
+    const dataAto = dto.dataAto ? new Date(dto.dataAto) : undefined;
+    const ano = dataAto && !Number.isNaN(dataAto.getTime()) ? dataAto.getUTCFullYear() : dto.ano;
+
     const act = await this.prisma.normativeAct.create({
       data: {
         tipo: dto.tipo,
         numero: dto.numero,
-        ano: dto.ano,
+        ano,
         ementa: dto.ementa,
         assunto: dto.assunto,
-        dataAto: dto.dataAto ? new Date(dto.dataAto) : undefined,
+        dataAto,
         dataPublicacao: dto.dataPublicacao ? new Date(dto.dataPublicacao) : undefined,
-        orgaoOrigem: dto.orgaoOrigem,
+        ...orgaoFields,
         autoridadeSignataria: dto.autoridadeSignataria,
         palavrasChave: dto.palavrasChave ?? [],
-        slug,
+        slug: buildActSlug(dto.tipo, ano, dto.numero),
         statusPublicacao: PublicationStatus.rascunho,
         situacao: ActSituacao.vigente,
-        units: {
-          create: [
-            {
-              tipoUnidade: UnitType.ementa,
-              texto: dto.ementa,
-              ordem: 0,
-              status: UnitStatus.vigente,
-            },
-          ],
-        },
       },
-      include: { units: { orderBy: { ordem: 'asc' } } },
     });
 
-    await this.createVersionForUnit(act.units[0].id, act.units[0].texto, act.id, act.dataAto);
-
-    return { ...act, codigo: formatActCode(act.tipo, act.numero, act.ano), hierarchyValid: true };
+    return {
+      ...act,
+      codigo: formatActCode(act.tipo, act.numero, act.ano),
+      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
+      hierarchyValid: true,
+      units: [],
+    };
   }
 
   async updateAct(id: string, dto: UpdateActDto) {
     await this.ensureAct(id);
+    const orgaoFields = await this.resolveOrgaoFields(dto);
+    const dataAto =
+      dto.dataAto !== undefined ? (dto.dataAto ? new Date(dto.dataAto) : null) : undefined;
+
     const act = await this.prisma.normativeAct.update({
       where: { id },
       data: {
         ...(dto.ementa !== undefined && { ementa: dto.ementa }),
         ...(dto.assunto !== undefined && { assunto: dto.assunto }),
         ...(dto.situacao !== undefined && { situacao: dto.situacao }),
-        ...(dto.dataAto !== undefined && { dataAto: new Date(dto.dataAto) }),
+        ...(dataAto !== undefined && { dataAto }),
+        ...(dataAto instanceof Date &&
+          !Number.isNaN(dataAto.getTime()) && { ano: dataAto.getUTCFullYear() }),
         ...(dto.dataPublicacao !== undefined && {
-          dataPublicacao: new Date(dto.dataPublicacao),
+          dataPublicacao: dto.dataPublicacao ? new Date(dto.dataPublicacao) : null,
         }),
-        ...(dto.orgaoOrigem !== undefined && { orgaoOrigem: dto.orgaoOrigem }),
+        ...orgaoFields,
         ...(dto.autoridadeSignataria !== undefined && {
           autoridadeSignataria: dto.autoridadeSignataria,
         }),
@@ -568,12 +594,15 @@ export class NormativeActsService {
           observacoesInternas: dto.observacoesInternas,
         }),
       },
-      include: { units: { orderBy: { ordem: 'asc' } } },
+      include: { units: { orderBy: { ordem: 'asc' } }, orgao: true },
     });
     return {
       ...act,
+      orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
+      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
       hierarchyValid: this.validateHierarchy(act.units),
+      orgao: undefined,
     };
   }
 

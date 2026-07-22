@@ -127,6 +127,10 @@ export function defaultIdentificacao(
       return `SUBSEÇÃO ${siblings(UnitType.subsecao).length + 1}`;
     case UnitType.anexo:
       return `ANEXO ${units.filter((u) => u.tipoUnidade === UnitType.anexo).length + 1}`;
+    case UnitType.considerando:
+      return 'Considerando';
+    case UnitType.preambulo:
+      return 'Preâmbulo';
     default:
       return undefined;
   }

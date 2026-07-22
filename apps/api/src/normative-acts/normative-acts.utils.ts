@@ -21,6 +21,44 @@ export function formatActCode(tipo: ActType, numero: number, ano: number): strin
   return `${ACT_TYPE_LABELS[tipo]} nº ${numero.toLocaleString('pt-BR')}/${ano}`;
 }
 
+const MONTHS_PT = [
+  'JANEIRO',
+  'FEVEREIRO',
+  'MARÇO',
+  'ABRIL',
+  'MAIO',
+  'JUNHO',
+  'JULHO',
+  'AGOSTO',
+  'SETEMBRO',
+  'OUTUBRO',
+  'NOVEMBRO',
+  'DEZEMBRO',
+] as const;
+
+/** Título formal institucional: "DECRETO Nº 10.766, DE 16 DE MAIO DE 2018". */
+export function formatFormalTitle(
+  tipo: ActType,
+  numero: number,
+  ano: number,
+  dataAto?: Date | string | null,
+): string {
+  const typeLabel = ACT_TYPE_LABELS[tipo].toUpperCase();
+  const num = numero.toLocaleString('pt-BR');
+
+  if (dataAto) {
+    const d = typeof dataAto === 'string' ? new Date(dataAto) : dataAto;
+    if (!Number.isNaN(d.getTime())) {
+      const day = d.getUTCDate();
+      const month = MONTHS_PT[d.getUTCMonth()];
+      const year = d.getUTCFullYear();
+      return `${typeLabel} Nº ${num}, DE ${day} DE ${month} DE ${year}`;
+    }
+  }
+
+  return `${typeLabel} Nº ${num}, DE ${ano}`;
+}
+
 export function parseSlug(slug: string): { tipo: string; ano: number; numero: number } | null {
   const parts = slug.split('/');
   if (parts.length !== 3) return null;

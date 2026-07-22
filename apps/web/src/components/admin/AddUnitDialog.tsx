@@ -12,7 +12,9 @@ import {
 } from '@/lib/unit-hierarchy';
 import type { NormativeUnit, UnitType } from '@/lib/types';
 
-type Category = 'dispositivos' | 'divisoes';
+type Category = 'dispositivos' | 'divisoes' | 'intro';
+
+const INTRO_TYPES: UnitType[] = ['considerando', 'preambulo'];
 
 export function AddUnitDialog({
   open,
@@ -36,7 +38,12 @@ export function AddUnitDialog({
   const [titulo, setTitulo] = useState('');
   const [parentUnitId, setParentUnitId] = useState<string>('');
 
-  const typeOptions = category === 'divisoes' ? DIVISION_TYPES : HIERARCHY_TYPES;
+  const typeOptions =
+    category === 'divisoes'
+      ? DIVISION_TYPES
+      : category === 'intro'
+        ? INTRO_TYPES
+        : HIERARCHY_TYPES;
   const validParents = useMemo(() => getValidParents(tipo, units), [tipo, units]);
   const isDivision = isStructuralType(tipo);
 
@@ -46,13 +53,16 @@ export function AddUnitDialog({
     onConfirm({
       tipoUnidade: tipo,
       identificacao: identificacao.trim() || undefined,
-      texto: isDivision ? titulo.trim() : undefined,
+      texto:
+        isDivision || category === 'intro'
+          ? titulo.trim() || (category === 'intro' ? ' ' : undefined)
+          : undefined,
       parentUnitId: parentUnitId || null,
     });
     setIdentificacao('');
     setTitulo('');
     setParentUnitId('');
-    setTipo(category === 'divisoes' ? 'titulo' : 'artigo');
+    setTipo(category === 'divisoes' ? 'titulo' : category === 'intro' ? 'considerando' : 'artigo');
     onClose();
   };
 
@@ -67,7 +77,7 @@ export function AddUnitDialog({
           Adicionar elemento
         </h3>
 
-        <div className="mb-4 flex gap-2">
+        <div className="mb-4 flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => {
@@ -95,6 +105,20 @@ export function AddUnitDialog({
             }`}
           >
             Divisões
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCategory('intro');
+              setTipo('considerando');
+            }}
+            className={`flex-1 rounded-[10px] border px-3 py-2 text-[13px] font-semibold ${
+              category === 'intro'
+                ? 'border-brand bg-brand-soft text-brand'
+                : 'border-line text-ink-3'
+            }`}
+          >
+            Intro
           </button>
         </div>
 
@@ -143,13 +167,20 @@ export function AddUnitDialog({
             />
           </div>
 
-          {isDivision && (
+          {(isDivision || category === 'intro') && (
             <div>
-              <label className="mb-1 block text-[12px] text-ink-3">Título</label>
-              <Input
+              <label className="mb-1 block text-[12px] text-ink-3">
+                {category === 'intro' ? 'Texto' : 'Título'}
+              </label>
+              <textarea
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
-                placeholder="Ex.: DISPOSIÇÕES GERAIS, DO IMPOSTO"
+                placeholder={
+                  category === 'intro'
+                    ? 'CONSIDERANDO que... / Faço saber que...'
+                    : 'Ex.: DISPOSIÇÕES GERAIS, DO IMPOSTO'
+                }
+                className="min-h-[72px] w-full rounded-[10px] border border-line px-3.5 py-2 text-[13.5px] focus-ring"
               />
             </div>
           )}

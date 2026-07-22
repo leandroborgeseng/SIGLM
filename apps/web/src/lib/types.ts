@@ -32,6 +32,7 @@ export type UnitType =
   | 'item'
   | 'anexo'
   | 'preambulo'
+  | 'considerando'
   | 'ementa';
 
 export type EffectType =
@@ -70,9 +71,11 @@ export interface ActSummary {
   situacao: ActSituacao;
   dataPublicacao: string | null;
   orgaoOrigem: string | null;
+  orgaoOrigemId?: string | null;
   assunto: string | null;
   slug: string;
   codigo: string;
+  tituloFormal?: string;
   snippet?: string;
   rank?: number;
 }

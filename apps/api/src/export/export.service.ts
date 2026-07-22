@@ -2,8 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
-import { formatActCode, SITUACAO_LABELS, parseSlug } from '../normative-acts/normative-acts.utils';
-import { renderConsolidatedHtml, type ExportAct } from './act-html.renderer';
+import { formatActCode, formatFormalTitle, SITUACAO_LABELS, parseSlug } from '../normative-acts/normative-acts.utils';
+import { renderConsolidatedHtml, sortUnitsForDisplay, type ExportAct } from './act-html.renderer';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const dejavuRoot = path.dirname(require.resolve('dejavu-fonts-ttf/package.json'));
@@ -82,23 +82,31 @@ export class ExportService {
       doc.registerFont('serif', DEJAVU_SERIF);
       doc.registerFont('serif-bold', DEJAVU_BOLD);
 
-      doc.font('serif-bold').fontSize(11).fillColor('#0066CC').text(act.codigo, { continued: true });
-      doc.font('serif').fontSize(10).fillColor('#5B6B82').text(`  ·  ${SITUACAO_LABELS[act.situacao]}`);
-      doc.moveDown(0.5);
-      doc.font('serif-bold').fontSize(14).fillColor('#0F1B2D').text(act.ementa, { align: 'left' });
+      doc.font('serif').fontSize(10).fillColor('#647389').text('Prefeitura Municipal de Franca/SP', {
+        align: 'center',
+      });
+      doc.moveDown(0.75);
+      const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
+      doc.font('serif-bold').fontSize(13).fillColor('#0F1B2D').text(tituloFormal, { align: 'center' });
+      doc.moveDown(0.6);
+      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(act.ementa, { align: 'right' });
       doc.moveDown(0.5);
       doc.font('serif').fontSize(9).fillColor('#647389');
       const meta = [
-        act.dataPublicacao ? `Publicação: ${act.dataPublicacao.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}` : null,
+        act.codigo,
+        SITUACAO_LABELS[act.situacao],
+        act.dataAto
+          ? `Ato: ${act.dataAto.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}`
+          : null,
+        act.dataPublicacao
+          ? `Pub.: ${act.dataPublicacao.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}`
+          : null,
         act.orgaoOrigem ? `Órgão: ${act.orgaoOrigem}` : null,
-        act.assunto ? `Assunto: ${act.assunto}` : null,
       ].filter(Boolean);
-      if (meta.length) doc.text(meta.join('  ·  '));
+      if (meta.length) doc.text(meta.join('  ·  '), { align: 'center' });
       doc.moveDown(1);
-      doc.font('serif-bold').fontSize(9).fillColor('#97A3B6').text('TEXTO CONSOLIDADO', { characterSpacing: 1 });
-      doc.moveDown(0.75);
 
-      for (const unit of act.units) {
+      for (const unit of sortUnitsForDisplay(act.units)) {
         this.writePdfUnit(doc, unit);
       }
 
@@ -113,9 +121,26 @@ export class ExportService {
   }
 
   private writePdfUnit(doc: InstanceType<typeof PDFDocument>, unit: ExportAct['units'][number]) {
-    const isStructural = ['titulo', 'capitulo', 'livro', 'secao', 'subsecao'].includes(unit.tipoUnidade);
+    const isStructural = [
+      'parte',
+      'livro',
+      'titulo',
+      'subtitulo',
+      'capitulo',
+      'subcapitulo',
+      'secao',
+      'subsecao',
+      'anexo',
+    ].includes(unit.tipoUnidade);
     const isPreamble = unit.tipoUnidade === 'preambulo';
+    const isConsiderando = unit.tipoUnidade === 'considerando';
     const isRevoked = unit.status === 'revogada';
+
+    if (isConsiderando) {
+      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(unit.texto, { align: 'justify', lineGap: 3 });
+      doc.moveDown(0.4);
+      return;
+    }
 
     if (isPreamble) {
       doc.font('serif').fontSize(11).fillColor('#36465B').text(unit.texto, { align: 'center' });
@@ -130,6 +155,8 @@ export class ExportService {
       doc.moveDown(0.75);
       return;
     }
+
+    if (unit.tipoUnidade === 'ementa') return;
 
     if (unit.tipoUnidade === 'artigo') {
       const prefix = unit.identificacao ? `${unit.identificacao} ` : '';

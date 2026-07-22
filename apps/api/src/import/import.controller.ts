@@ -93,7 +93,9 @@ export class ImportController {
       numero?: number;
       ano?: number;
       ementa?: string;
+      dataAto?: string;
       orgaoOrigem?: string;
+      orgaoOrigemId?: string;
       efeitosAceitos?: string[];
     },
   ) {

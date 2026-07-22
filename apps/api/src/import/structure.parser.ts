@@ -1,4 +1,4 @@
-import { extractActMetadata, type DetectedActMetadata } from './metadata.parser';
+import { extractActMetadata, isFormalTitleLine, type DetectedActMetadata } from './metadata.parser';
 
 export interface StructureBlock {
   tag: string;
@@ -18,6 +18,7 @@ export interface DetectedStructure {
 }
 
 const EMENTA_RE = /^(?:EMENTA|Ementa)[:\s]/i;
+const CONSIDERANDO_RE = /^CONSIDERANDO\b/i;
 const PREAMBULO_RE = /Faço saber|Faço saber que/i;
 const PARTE_RE = /^(PARTE)\s+(.+)$/i;
 const LIVRO_RE = /^(LIVRO)\s+(.+)$/i;
@@ -145,12 +146,18 @@ function divisionTag(label: string, rest: string): { tag: string; texto: string 
 }
 
 function detectLine(line: string): { tipo: string; tag: string; texto: string } | null {
+  if (isFormalTitleLine(line)) {
+    return null; // título formal vai para metadados, não para unidades
+  }
   if (EMENTA_RE.test(line)) {
     return {
       tipo: 'ementa',
       tag: 'Ementa',
       texto: line.replace(/^EMENTA[:\s]*/i, '').trim() || line,
     };
+  }
+  if (CONSIDERANDO_RE.test(line)) {
+    return { tipo: 'considerando', tag: 'Considerando', texto: line };
   }
   if (PREAMBULO_RE.test(line)) {
     return { tipo: 'preambulo', tag: 'Preâmbulo', texto: line };
@@ -309,6 +316,7 @@ export function parseStructure(
   const stack: StackEntry[] = [];
 
   for (const line of lines) {
+    if (isFormalTitleLine(line)) continue;
     const detected = detectLine(line);
     if (detected) {
       trimStackForType(stack, detected.tipo);

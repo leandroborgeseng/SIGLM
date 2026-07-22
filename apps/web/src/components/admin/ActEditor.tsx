@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -19,17 +19,19 @@ import { Input, Select } from '@/components/ui/Form';
 import { useToast } from '@/components/ui/Toast';
 import {
   addUnit,
+  listOrgans,
   publishAct,
   restoreUnitVersion,
   saveLegislativeEffects,
   saveUnits,
   submitForReview,
   updateAct,
+  type OriginOrg,
   type UnitPayload,
 } from '@/lib/admin-api';
 import { LegislativeEffectsSection } from '@/components/admin/LegislativeEffectsSection';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
-import { ACT_TYPE_LABELS, cn } from '@/lib/format';
+import { ACT_TYPE_LABELS, cn, formatFormalTitle, toDateInputValue } from '@/lib/format';
 import type { ActDetail, LegislativeEffect, NormativeUnit, UnitType } from '@/lib/types';
 import {
   dragDropBlock,
@@ -66,12 +68,50 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const [units, setUnits] = useState<NormativeUnit[]>(initialAct.units);
   const [ementa, setEmenta] = useState(initialAct.ementa);
   const [assunto, setAssunto] = useState(initialAct.assunto ?? '');
-  const [orgao, setOrgao] = useState(initialAct.orgaoOrigem ?? '');
+  const [dataAto, setDataAto] = useState(toDateInputValue(initialAct.dataAto));
+  const [orgaoId, setOrgaoId] = useState(initialAct.orgaoOrigemId ?? '');
+  const [organs, setOrgans] = useState<OriginOrg[]>([]);
   const [saving, setSaving] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
+  useEffect(() => {
+    listOrgans(false)
+      .then((list) => {
+        setOrgans(list);
+        // Mantém órgão inativo já vinculado na lista de opções
+        if (
+          initialAct.orgaoOrigemId &&
+          !list.some((o) => o.id === initialAct.orgaoOrigemId)
+        ) {
+          setOrgans((prev) => [
+            ...prev,
+            {
+              id: initialAct.orgaoOrigemId!,
+              nome: initialAct.orgaoOrigem ?? 'Órgão inativo',
+              ativo: false,
+            },
+          ]);
+        }
+      })
+      .catch(() => undefined);
+  }, [initialAct.orgaoOrigem, initialAct.orgaoOrigemId]);
+
+  const tituloFormalPreview = formatFormalTitle(
+    act.tipo,
+    act.numero,
+    dataAto ? new Date(dataAto).getUTCFullYear() || act.ano : act.ano,
+    dataAto || null,
+  );
+
   const hierarchyValid = useMemo(() => validateUnitsHierarchy(units), [units]);
+
+  const metaPayload = () => ({
+    ementa,
+    assunto,
+    dataAto: dataAto || undefined,
+    orgaoOrigemId: orgaoId || undefined,
+  });
 
   const moveUnit = (index: number, direction: -1 | 1) => {
     const next = moveUnitBlock(units, index, direction);
@@ -145,7 +185,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateAct(act.id, { ementa, assunto, orgaoOrigem: orgao });
+      await updateAct(act.id, metaPayload());
       await persistUnits();
       toast('Rascunho salvo', 'ok');
       router.refresh();
@@ -159,7 +199,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const handleSubmitReview = async () => {
     setSaving(true);
     try {
-      await updateAct(act.id, { ementa, assunto, orgaoOrigem: orgao });
+      await updateAct(act.id, metaPayload());
       await persistUnits();
       const updated = await submitForReview(act.id);
       setAct(updated);
@@ -175,7 +215,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const handlePublish = async () => {
     setSaving(true);
     try {
-      await updateAct(act.id, { ementa, assunto, orgaoOrigem: orgao });
+      await updateAct(act.id, metaPayload());
       await persistUnits();
       const updated = await publishAct(act.id);
       setAct(updated);
@@ -264,6 +304,24 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               </div>
             </div>
             <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Data do ato</label>
+              <Input
+                type="date"
+                value={dataAto}
+                onChange={(e) => setDataAto(e.target.value)}
+                className="font-mono"
+              />
+              <p className="mt-1 text-[11px] text-ink-4">
+                Gera o título formal automaticamente. O ano pode ser preenchido a partir desta data.
+              </p>
+            </div>
+            <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wide text-ink-4">Título formal</p>
+              <p className="mt-0.5 text-[13px] font-semibold uppercase text-ink">
+                {tituloFormalPreview}
+              </p>
+            </div>
+            <div>
               <label className="mb-1 block text-[12px] text-ink-3">Ementa</label>
               <textarea
                 value={ementa}
@@ -277,7 +335,17 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
             </div>
             <div>
               <label className="mb-1 block text-[12px] text-ink-3">Órgão de origem</label>
-              <Input value={orgao} onChange={(e) => setOrgao(e.target.value)} />
+              <Select value={orgaoId} onChange={(e) => setOrgaoId(e.target.value)}>
+                <option value="">Selecione…</option>
+                {organs
+                  .filter((o) => o.ativo || o.id === orgaoId)
+                  .map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.nome}
+                      {!o.ativo ? ' (inativo)' : ''}
+                    </option>
+                  ))}
+              </Select>
             </div>
           </div>
         </section>

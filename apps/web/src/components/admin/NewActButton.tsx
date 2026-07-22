@@ -1,37 +1,51 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
 import { useToast } from '@/components/ui/Toast';
-import { createAct } from '@/lib/admin-api';
-import { ACT_TYPE_LABELS, ACT_TYPES } from '@/lib/format';
+import { createAct, listOrgans, type OriginOrg } from '@/lib/admin-api';
+import { ACT_TYPE_LABELS, ACT_TYPES, formatFormalTitle } from '@/lib/format';
+import type { ActType } from '@/lib/types';
 
 export function NewActButton() {
   const router = useRouter();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [organs, setOrgans] = useState<OriginOrg[]>([]);
   const [form, setForm] = useState({
-    tipo: 'lei',
+    tipo: 'lei' as ActType,
     numero: '',
     ano: String(new Date().getFullYear()),
+    dataAto: '',
     ementa: '',
-    orgaoOrigem: 'Câmara Municipal de Franca',
+    orgaoOrigemId: '',
   });
+
+  useEffect(() => {
+    if (!open) return;
+    listOrgans(true)
+      .then(setOrgans)
+      .catch(() => undefined);
+  }, [open]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
+      const ano = form.dataAto
+        ? new Date(form.dataAto).getUTCFullYear()
+        : Number(form.ano);
       const act = await createAct({
         tipo: form.tipo,
         numero: Number(form.numero),
-        ano: Number(form.ano),
+        ano,
         ementa: form.ementa,
-        orgaoOrigem: form.orgaoOrigem,
+        dataAto: form.dataAto || undefined,
+        orgaoOrigemId: form.orgaoOrigemId || undefined,
       });
       toast('Ato criado como rascunho', 'ok');
       setOpen(false);
@@ -53,6 +67,13 @@ export function NewActButton() {
     );
   }
 
+  const preview = formatFormalTitle(
+    form.tipo,
+    Number(form.numero) || 0,
+    form.dataAto ? new Date(form.dataAto).getUTCFullYear() : Number(form.ano) || new Date().getFullYear(),
+    form.dataAto || null,
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
       <form
@@ -65,7 +86,7 @@ export function NewActButton() {
             <label className="mb-1 block text-[12px] text-ink-3">Tipo</label>
             <Select
               value={form.tipo}
-              onChange={(e) => setForm({ ...form, tipo: e.target.value })}
+              onChange={(e) => setForm({ ...form, tipo: e.target.value as ActType })}
             >
               {ACT_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -99,6 +120,29 @@ export function NewActButton() {
             </div>
           </div>
           <div>
+            <label className="mb-1 block text-[12px] text-ink-3">Data do ato</label>
+            <Input
+              type="date"
+              value={form.dataAto}
+              onChange={(e) => {
+                const dataAto = e.target.value;
+                setForm({
+                  ...form,
+                  dataAto,
+                  ano: dataAto
+                    ? String(new Date(dataAto).getUTCFullYear())
+                    : form.ano,
+                });
+              }}
+              className="font-mono"
+            />
+          </div>
+          {form.numero && (
+            <p className="rounded-[8px] bg-surface-2 px-3 py-2 text-[12px] font-semibold uppercase text-ink">
+              {preview}
+            </p>
+          )}
+          <div>
             <label className="mb-1 block text-[12px] text-ink-3">Ementa</label>
             <textarea
               required
@@ -110,10 +154,17 @@ export function NewActButton() {
           </div>
           <div>
             <label className="mb-1 block text-[12px] text-ink-3">Órgão de origem</label>
-            <Input
-              value={form.orgaoOrigem}
-              onChange={(e) => setForm({ ...form, orgaoOrigem: e.target.value })}
-            />
+            <Select
+              value={form.orgaoOrigemId}
+              onChange={(e) => setForm({ ...form, orgaoOrigemId: e.target.value })}
+            >
+              <option value="">Selecione…</option>
+              {organs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.nome}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-2">

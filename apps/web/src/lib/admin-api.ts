@@ -45,7 +45,95 @@ export interface CreateActPayload {
   ano: number;
   ementa: string;
   assunto?: string;
+  dataAto?: string;
   orgaoOrigem?: string;
+  orgaoOrigemId?: string;
+}
+
+export interface OriginOrg {
+  id: string;
+  nome: string;
+  ativo: boolean;
+  _count?: { acts: number };
+}
+
+export interface AdminUser {
+  id: string;
+  nome: string;
+  email: string;
+  ativo: boolean;
+  role: { id: string; nome: string; descricao: string | null };
+}
+
+export interface AdminRole {
+  id: string;
+  nome: string;
+  descricao: string | null;
+  permissions: { permission: { id: string; chave: string } }[];
+  _count?: { users: number };
+}
+
+export function listOrgans(ativosOnly = false, token?: string) {
+  const q = ativosOnly ? '?ativos=true' : '';
+  return adminFetch<OriginOrg[]>(`/admin/organs${q}`, undefined, token);
+}
+
+export function createOrgan(nome: string, token?: string) {
+  return adminFetch<OriginOrg>('/admin/organs', {
+    method: 'POST',
+    body: JSON.stringify({ nome }),
+  }, token);
+}
+
+export function updateOrgan(
+  id: string,
+  data: { nome?: string; ativo?: boolean },
+  token?: string,
+) {
+  return adminFetch<OriginOrg>(`/admin/organs/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function listUsers(token?: string) {
+  return adminFetch<AdminUser[]>('/admin/users', undefined, token);
+}
+
+export function createUser(
+  data: { nome: string; email: string; senha: string; roleId: string },
+  token?: string,
+) {
+  return adminFetch<AdminUser>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function updateUser(
+  id: string,
+  data: { nome?: string; email?: string; senha?: string; roleId?: string; ativo?: boolean },
+  token?: string,
+) {
+  return adminFetch<AdminUser>(`/admin/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function listRoles(token?: string) {
+  return adminFetch<AdminRole[]>('/admin/roles', undefined, token);
+}
+
+export function listPermissions(token?: string) {
+  return adminFetch<{ id: string; chave: string }[]>('/admin/permissions', undefined, token);
+}
+
+export function setRolePermissions(roleId: string, permissionIds: string[], token?: string) {
+  return adminFetch<AdminRole>(`/admin/roles/${roleId}/permissions`, {
+    method: 'PATCH',
+    body: JSON.stringify({ permissionIds }),
+  }, token);
 }
 
 export interface UnitPayload {

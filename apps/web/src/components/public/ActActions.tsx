@@ -2,7 +2,6 @@
 
 import { Download, FileCode, FileText, Printer } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/api-url';
-import { Button } from '@/components/ui/Button';
 
 export function ActActions({
   tipo,
@@ -25,30 +24,32 @@ export function ActActions({
       : `${API_URL}${diarioUrl}`
     : undefined;
 
+  const linkClass =
+    'inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-[12.5px] text-ink-3 hover:bg-surface-2 hover:text-brand';
+
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button variant="outlined" size="sm" onClick={() => window.print()}>
-        <Printer className="h-4 w-4" />
+    <div className="flex flex-wrap items-center gap-1">
+      <button type="button" className={linkClass} onClick={() => window.print()}>
+        <Printer className="h-3.5 w-3.5" />
         Imprimir
-      </Button>
-      <a href={htmlUrl} download className="inline-flex">
-        <Button variant="outlined" size="sm">
-          <FileCode className="h-4 w-4" />
-          Exportar HTML
-        </Button>
+      </button>
+      <a href={htmlUrl} download className={linkClass}>
+        <FileCode className="h-3.5 w-3.5" />
+        HTML
       </a>
-      <a href={pdfUrl} download className="inline-flex">
-        <Button variant="outlined" size="sm">
-          <FileText className="h-4 w-4" />
-          Exportar PDF
-        </Button>
+      <a href={pdfUrl} download className={linkClass}>
+        <FileText className="h-3.5 w-3.5" />
+        PDF
       </a>
       {diarioFullUrl && (
-        <a href={diarioFullUrl} target="_blank" rel="noopener noreferrer" className="inline-flex">
-          <Button variant="tonal" size="sm">
-            <Download className="h-4 w-4" />
-            PDF do Diário Oficial
-          </Button>
+        <a
+          href={diarioFullUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={linkClass}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Diário Oficial
         </a>
       )}
     </div>

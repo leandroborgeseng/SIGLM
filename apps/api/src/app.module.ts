@@ -1,3 +1,4 @@
+import { AdministrationModule } from './administration/administration.module';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
@@ -11,7 +12,16 @@ import { NormativeActsModule } from './normative-acts/normative-acts.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [PrismaModule, AuditModule, AuthModule, NormativeActsModule, ConsolidationModule, ImportModule, ExportModule],
+  imports: [
+    PrismaModule,
+    AuditModule,
+    AuthModule,
+    NormativeActsModule,
+    ConsolidationModule,
+    ImportModule,
+    ExportModule,
+    AdministrationModule,
+  ],
   controllers: [AppController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
 })

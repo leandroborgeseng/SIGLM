@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { FileText, GitMerge, ScanText, Upload } from 'lucide-react';
+import { FileText, GitMerge, ScanText, Settings, Upload } from 'lucide-react';
 
 export type AdminPermission =
   | 'acts:read'
@@ -22,6 +22,7 @@ export const ADMIN_NAV: {
   { href: '/admin/importar', label: 'Importar', short: 'Import', icon: Upload, permission: 'imports:manage' },
   { href: '/admin/ocr', label: 'OCR', short: 'OCR', icon: ScanText, permission: 'imports:manage' },
   { href: '/admin/consolidar', label: 'Consolidar', short: 'Consol.', icon: GitMerge, permission: 'acts:consolidate' },
+  { href: '/admin/administracao', label: 'Administração', short: 'Admin', icon: Settings, permission: 'users:manage' },
 ];
 
 export function hasPermission(

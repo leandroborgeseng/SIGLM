@@ -46,6 +46,10 @@ export class CreateActDto {
 
   @IsOptional()
   @IsString()
+  orgaoOrigemId?: string;
+
+  @IsOptional()
+  @IsString()
   autoridadeSignataria?: string;
 
   @IsOptional()
@@ -79,6 +83,10 @@ export class UpdateActDto {
   @IsOptional()
   @IsString()
   orgaoOrigem?: string;
+
+  @IsOptional()
+  @IsString()
+  orgaoOrigemId?: string;
 
   @IsOptional()
   @IsString()

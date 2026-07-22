@@ -57,6 +57,18 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+model OriginOrg {
+  id        String   @id @default(uuid())
+  nome      String   @unique
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  acts NormativeAct[]
+
+  @@map("origin_orgs")
+}
+
 // ─── Normas ──────────────────────────────────────────────────────────────────
 
 enum ActType {
@@ -94,6 +106,7 @@ model NormativeAct {
   palavrasChave       String[]          @default([]) @map("palavras_chave")
   situacao            ActSituacao       @default(vigente)
   orgaoOrigem         String?           @map("orgao_origem")
+  orgaoOrigemId       String?           @map("orgao_origem_id")
   autoridadeSignataria String?          @map("autoridade_signataria")
   slug                String            @unique
   observacoesInternas String?           @map("observacoes_internas") @db.Text
@@ -102,6 +115,7 @@ model NormativeAct {
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
 
+  orgao              OriginOrg?        @relation(fields: [orgaoOrigemId], references: [id], onDelete: SetNull)
   units              NormativeUnit[]
   attachments        Attachment[]
   imports            Import[]
@@ -116,6 +130,7 @@ model NormativeAct {
   @@index([tipo, ano, numero])
   @@index([situacao])
   @@index([statusPublicacao])
+  @@index([orgaoOrigemId])
   @@map("normative_acts")
 }
 
@@ -136,6 +151,7 @@ enum UnitType {
   item
   anexo
   preambulo
+  considerando
   ementa
 }
 

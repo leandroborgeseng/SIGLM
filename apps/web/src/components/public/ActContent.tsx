@@ -1,17 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { Badge } from '@/components/ui/Badge';
-import { Tabs } from '@/components/ui/Form';
-import { cn, formatDate } from '@/lib/format';
+import { useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { cn, formatDate, formatFormalTitle } from '@/lib/format';
 import { unitIndentClass, UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
 import type { ActDetail, NormativeUnit, UnitType } from '@/lib/types';
 
-function noteVariant(nota: string | null): 'warn' | 'danger' | 'ok' | 'neutral' {
-  if (!nota) return 'neutral';
-  if (nota.toLowerCase().includes('revogado')) return 'danger';
-  if (nota.toLowerCase().includes('incluído')) return 'ok';
-  return 'warn';
+function noteClass(nota: string | null): string {
+  if (!nota) return 'text-ink-3';
+  if (nota.toLowerCase().includes('revogado')) return 'text-danger';
+  if (nota.toLowerCase().includes('incluído')) return 'text-ok';
+  return 'text-warn';
 }
 
 const STRUCTURAL_TYPES: UnitType[] = [
@@ -26,15 +25,33 @@ const STRUCTURAL_TYPES: UnitType[] = [
   'anexo',
 ];
 
+function sortUnitsForDisplay(units: NormativeUnit[]): NormativeUnit[] {
+  const weight = (tipo: UnitType) => {
+    if (tipo === 'ementa') return 99;
+    if (tipo === 'considerando') return 0;
+    if (tipo === 'preambulo') return 1;
+    return 2;
+  };
+  return [...units]
+    .filter((u) => u.tipoUnidade !== 'ementa')
+    .sort((a, b) => {
+      const wa = weight(a.tipoUnidade);
+      const wb = weight(b.tipoUnidade);
+      if (wa !== wb) return wa - wb;
+      return a.ordem - b.ordem;
+    });
+}
+
 function UnitBlock({
   unit,
   mode,
 }: {
   unit: NormativeUnit;
-  mode: 'consolidado' | 'original' | 'historico';
+  mode: 'consolidado' | 'original';
 }) {
   const isStructural = STRUCTURAL_TYPES.includes(unit.tipoUnidade);
   const isPreamble = unit.tipoUnidade === 'preambulo';
+  const isConsiderando = unit.tipoUnidade === 'considerando';
   const isRevoked = unit.status === 'revogada';
   const isIncluded = unit.status === 'incluida';
   const isAltered = unit.status === 'alterada';
@@ -47,15 +64,24 @@ function UnitBlock({
     if (isAltered && unit.versoes.length > 0) texto = unit.versoes[0].texto;
   }
 
-  if (mode === 'historico') return null;
-
   const indent = unitIndentClass(unit.tipoUnidade);
   const anchorId =
     unit.identificacao?.replace(/\s+/g, '-').toLowerCase() ?? `unit-${unit.ordem}`;
 
+  if (isConsiderando) {
+    return (
+      <article id={anchorId} className="mb-3">
+        <p className="text-[15px] leading-[1.75] text-ink text-justify">{texto}</p>
+        {mode === 'consolidado' && unit.nota && (
+          <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
+        )}
+      </article>
+    );
+  }
+
   if (isPreamble) {
     return (
-      <article id={anchorId} className="legal-body mb-6 text-center italic text-ink-2">
+      <article id={anchorId} className="mb-6 text-center italic text-[15px] leading-[1.75] text-ink-2">
         {texto}
       </article>
     );
@@ -63,21 +89,17 @@ function UnitBlock({
 
   if (isStructural) {
     return (
-      <article id={anchorId} className={cn('mb-6', indent)}>
-        <h3 className="legal-body text-center text-[15px] font-semibold uppercase tracking-wide text-ink">
+      <article id={anchorId} className={cn('mb-5', indent)}>
+        <h3 className="text-center text-[15px] font-semibold uppercase tracking-wide text-ink">
           {unit.identificacao && <span className="block">{unit.identificacao}</span>}
           {texto}
         </h3>
         {mode === 'consolidado' && unit.nota && (
-          <div className="mt-2 text-center">
-            <Badge variant={noteVariant(unit.nota)}>{unit.nota}</Badge>
-          </div>
+          <p className={cn('mt-1 text-center text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
         )}
       </article>
     );
   }
-
-  if (unit.tipoUnidade === 'ementa') return null;
 
   const showLabel = [
     'artigo',
@@ -94,7 +116,7 @@ function UnitBlock({
       id={anchorId}
       className={cn('mb-4', indent, isRevoked && mode === 'consolidado' && 'opacity-80')}
     >
-      <p className="legal-body text-ink">
+      <p className="text-[15px] leading-[1.75] text-ink text-justify">
         {showLabel && label && (
           <strong
             className={cn(
@@ -111,104 +133,146 @@ function UnitBlock({
         </span>
       </p>
       {mode === 'consolidado' && unit.nota && (
-        <div className="mt-2">
-          <Badge variant={noteVariant(unit.nota)}>{unit.nota}</Badge>
-        </div>
+        <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
       )}
     </article>
   );
 }
 
 export function ActContent({ act }: { act: ActDetail }) {
-  const [tab, setTab] = useState('consolidado');
-  const articles = act.units.filter(
-    (u) => u.tipoUnidade === 'artigo' && u.identificacao,
-  );
+  const [tab, setTab] = useState<'consolidado' | 'original' | 'historico'>('consolidado');
+  const [tocOpen, setTocOpen] = useState(false);
+
+  const displayUnits = useMemo(() => sortUnitsForDisplay(act.units), [act.units]);
+  const articles = displayUnits.filter((u) => u.tipoUnidade === 'artigo' && u.identificacao);
+  const tituloFormal =
+    act.tituloFormal ?? formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
 
   return (
-    <div>
-      <Tabs
-        tabs={[
-          { id: 'consolidado', label: 'Texto consolidado' },
-          { id: 'original', label: 'Texto original' },
-          { id: 'historico', label: 'Histórico de alterações' },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+    <div className="bg-white text-ink">
+      <header className="mb-8">
+        <div className="mb-6 flex flex-col items-center gap-2 text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/franca-mark.png"
+            alt="Brasão de Franca"
+            className="h-14 w-14 object-contain"
+          />
+          <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-3">
+            Prefeitura Municipal de Franca/SP
+          </p>
+        </div>
 
-      <div className="mt-8 grid gap-8 lg:grid-cols-[220px_1fr]">
-        {tab !== 'historico' && (
-          <>
-            <details className="no-print rounded-[10px] border border-line bg-surface p-3 lg:hidden">
-              <summary className="touch-target cursor-pointer text-[13px] font-semibold text-ink">
-                Sumário ({articles.length} artigos)
-              </summary>
-              <ul className="mt-2 space-y-1">
-                {articles.map((u) => (
-                  <li key={u.id}>
-                    <a
-                      href={`#${u.identificacao?.replace(/\s+/g, '-').toLowerCase()}`}
-                      className="touch-target block rounded-[8px] px-2 py-2 font-mono text-[12px] text-ink-3 hover:bg-brand-soft hover:text-brand"
-                    >
-                      {u.identificacao}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </details>
-            <nav className="no-print sticky top-20 hidden h-fit lg:block" aria-label="Sumário do ato">
-              <p className="text-section mb-3">Sumário</p>
-              <ul className="space-y-1">
-                {articles.map((u) => (
-                  <li key={u.id}>
-                    <a
-                      href={`#${u.identificacao?.replace(/\s+/g, '-').toLowerCase()}`}
-                      className="block rounded-[8px] px-2 py-1.5 font-mono text-[12px] text-ink-3 hover:bg-brand-soft hover:text-brand"
-                    >
-                      {u.identificacao}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-          </>
-        )}
+        <h1 className="mb-4 text-center text-[17px] font-bold uppercase leading-snug tracking-wide text-ink sm:text-[18px]">
+          {tituloFormal}
+        </h1>
 
-        <div className={tab === 'historico' ? 'lg:col-span-2' : ''}>
-          {tab === 'historico' ? (
-            <ol className="relative space-y-6 border-l-2 border-line pl-6">
-              <li>
-                <span className="absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-brand bg-surface" />
-                <p className="font-mono text-[12px] text-ink-3">{formatDate(act.dataPublicacao)}</p>
-                <p className="mt-1 font-semibold text-ink">Publicação original</p>
-                <p className="text-[13.5px] text-ink-2">{act.codigo}</p>
-              </li>
-              {act.history.map((h) => (
-                <li key={h.id}>
-                  <span className="absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-warn bg-surface" />
-                  <p className="font-mono text-[12px] text-ink-3">{formatDate(h.data)}</p>
-                  <p className="mt-1 font-semibold text-ink">{h.nota ?? h.tipoAlteracao}</p>
-                  {h.dispositivo && (
-                    <p className="text-[13px] text-ink-2">Dispositivo: {h.dispositivo}</p>
-                  )}
-                  {h.normaAlteradora && (
-                    <p className="font-mono text-[12.5px] text-brand">{h.normaAlteradora.codigo}</p>
-                  )}
+        <p className="ml-auto mb-5 max-w-[min(100%,36rem)] text-right text-[14.5px] leading-relaxed text-ink">
+          {act.ementa}
+        </p>
+
+        <p className="no-print text-center text-[12px] text-ink-3">
+          {act.codigo}
+          <span className="mx-1.5">·</span>
+          {act.situacao.replace(/_/g, ' ')}
+          {act.orgaoOrigem ? (
+            <>
+              <span className="mx-1.5">·</span>
+              {act.orgaoOrigem}
+            </>
+          ) : null}
+          <span className="mx-1.5">·</span>
+          Ato: {formatDate(act.dataAto)}
+          <span className="mx-1.5">·</span>
+          Pub.: {formatDate(act.dataPublicacao)}
+        </p>
+      </header>
+
+      {tab !== 'historico' && articles.length > 0 && (
+        <div className="no-print mb-6 border-b border-line/60 pb-2">
+          <button
+            type="button"
+            onClick={() => setTocOpen((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-[14px] text-brand hover:underline"
+            aria-expanded={tocOpen}
+          >
+            Sumário
+            <ChevronDown
+              className={cn('h-4 w-4 transition-transform', tocOpen && 'rotate-180')}
+              aria-hidden
+            />
+          </button>
+          {tocOpen && (
+            <ul className="mt-3 space-y-1 pl-1">
+              {articles.map((u) => (
+                <li key={u.id}>
+                  <a
+                    href={`#${u.identificacao?.replace(/\s+/g, '-').toLowerCase()}`}
+                    className="text-[14px] text-brand hover:underline"
+                  >
+                    {u.identificacao}
+                  </a>
                 </li>
               ))}
-            </ol>
-          ) : (
-            act.units.map((unit) => (
-              <UnitBlock
-                key={unit.id}
-                unit={unit}
-                mode={tab as 'consolidado' | 'original'}
-              />
-            ))
+            </ul>
           )}
         </div>
+      )}
+
+      <div className="min-w-0">
+        {tab === 'historico' ? (
+          <ol className="relative space-y-5 border-l border-line pl-5">
+            <li>
+              <p className="text-[12px] text-ink-3">{formatDate(act.dataPublicacao)}</p>
+              <p className="mt-0.5 font-medium text-ink">Publicação original</p>
+              <p className="text-[14px] text-ink-2">{act.codigo}</p>
+            </li>
+            {act.history.map((h) => (
+              <li key={h.id}>
+                <p className="text-[12px] text-ink-3">{formatDate(h.data)}</p>
+                <p className="mt-0.5 font-medium text-ink">{h.nota ?? h.tipoAlteracao}</p>
+                {h.dispositivo && (
+                  <p className="text-[13px] text-ink-2">Dispositivo: {h.dispositivo}</p>
+                )}
+                {h.normaAlteradora && (
+                  <p className="text-[13px] text-brand">{h.normaAlteradora.codigo}</p>
+                )}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          displayUnits.map((unit) => <UnitBlock key={unit.id} unit={unit} mode={tab} />)
+        )}
       </div>
+
+      <section className="no-print mt-12 border-t border-line pt-6">
+        <p className="mb-3 text-[12px] font-medium uppercase tracking-wide text-ink-3">
+          Versões e histórico
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              { id: 'consolidado', label: 'Texto consolidado' },
+              { id: 'original', label: 'Texto original' },
+              { id: 'historico', label: 'Histórico de alterações' },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setTab(opt.id)}
+              className={cn(
+                'rounded border px-3 py-1.5 text-[13px] transition-colors',
+                tab === opt.id
+                  ? 'border-brand bg-brand-soft text-brand'
+                  : 'border-line text-ink-2 hover:border-brand/40',
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
