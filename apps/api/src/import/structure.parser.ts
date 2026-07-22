@@ -132,7 +132,8 @@ function pushBlock(
 
 function appendToLastBlock(blocos: StructureBlock[], line: string) {
   const last = blocos[blocos.length - 1];
-  if (last.tipo === 'preambulo') {
+  // Preâmbulo/ementa/texto: preservar quebras de linha do original (ex.: CONSIDERANDO).
+  if (['preambulo', 'considerando', 'ementa', 'texto_simples'].includes(last.tipo)) {
     last.texto = last.texto ? `${last.texto}\n${line}` : line;
     return;
   }

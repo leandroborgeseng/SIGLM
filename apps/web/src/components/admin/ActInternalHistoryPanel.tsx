@@ -22,6 +22,7 @@ const ACAO_LABELS: Record<string, string> = {
   editar_metadados: 'Metadados',
   salvar_unidades: 'Salvar estrutura',
   incluir_elemento: 'Incluir elemento',
+  excluir_elemento: 'Excluir elemento',
   efeitos_legislativos: 'Efeitos legislativos',
   enviar_revisao: 'Enviar revisão',
   publicacao: 'Publicação',

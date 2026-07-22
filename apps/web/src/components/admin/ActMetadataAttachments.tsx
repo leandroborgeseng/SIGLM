@@ -327,9 +327,11 @@ function SupplementSection({
 export function ActMetadataAttachments({
   actId,
   editable,
+  onOriginalChange,
 }: {
   actId: string;
   editable: boolean;
+  onOriginalChange?: (original: ActAttachment | null) => void;
 }) {
   const { toast } = useToast();
   const [bundle, setBundle] = useState<ActAttachmentsBundle | null>(null);
@@ -337,9 +339,12 @@ export function ActMetadataAttachments({
 
   const reload = useCallback(() => {
     listActAttachments(actId)
-      .then(setBundle)
+      .then((b) => {
+        setBundle(b);
+        onOriginalChange?.(b.original);
+      })
       .catch(() => undefined);
-  }, [actId]);
+  }, [actId, onOriginalChange]);
 
   useEffect(() => {
     reload();

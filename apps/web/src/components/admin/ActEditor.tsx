@@ -14,11 +14,17 @@ import {
   History,
   Pencil,
   Plus,
+  Trash2,
 } from 'lucide-react';
 import { AddUnitDialog } from '@/components/admin/AddUnitDialog';
 import { ActMetadataAttachments } from '@/components/admin/ActMetadataAttachments';
 import { AdminTopbar } from '@/components/admin/AdminShell';
+import { DeleteUnitDialog } from '@/components/admin/DeleteUnitDialog';
 import { EditUnitDialog } from '@/components/admin/EditUnitDialog';
+import {
+  CompareModeToggle,
+  OriginalFilePane,
+} from '@/components/admin/OriginalFileCompare';
 import { UnitTextEditor } from '@/components/admin/UnitTextEditor';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -27,6 +33,8 @@ import { useToast } from '@/components/ui/Toast';
 import {
   addUnit,
   createActEdition,
+  deleteUnit,
+  listActAttachments,
   listOrgans,
   publishAct,
   restoreUnitVersion,
@@ -46,7 +54,7 @@ import {
   type LetterSpacing,
   type UnitFormatacao,
 } from '@/lib/rich-text';
-import type { ActDetail, LegislativeEffect, NormativeUnit, UnitType } from '@/lib/types';
+import type { ActAttachment, ActDetail, LegislativeEffect, NormativeUnit, UnitType } from '@/lib/types';
 import {
   type AddContext,
   assessUnitsHierarchy,
@@ -113,6 +121,14 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addContext, setAddContext] = useState<AddContext>({ mode: 'end' });
   const [editUnit, setEditUnit] = useState<NormativeUnit | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<NormativeUnit | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [originalFile, setOriginalFile] = useState<ActAttachment | null>(
+    initialAct.arquivoOriginal ?? null,
+  );
+  const [splitPct, setSplitPct] = useState(46);
+  const [mobilePane, setMobilePane] = useState<'original' | 'texto'>('texto');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const savedFingerprint = useRef(
     fingerprint(
@@ -148,6 +164,12 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       })
       .catch(() => undefined);
   }, [initialAct.orgaoOrigem, initialAct.orgaoOrigemId]);
+
+  useEffect(() => {
+    listActAttachments(act.id)
+      .then((bundle) => setOriginalFile(bundle.original))
+      .catch(() => undefined);
+  }, [act.id]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -307,6 +329,25 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     toast('Elemento atualizado — salve as alterações para gravar', 'ok');
   };
 
+  const handleDeleteUnit = async (opts: {
+    mode: 'cascade' | 'reparent';
+    newParentId?: string | null;
+    confirmEffectCleanup?: boolean;
+  }) => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const updated = await deleteUnit(act.id, deleteTarget.id, opts);
+      syncFromAct(updated);
+      setDeleteTarget(null);
+      toast('Elemento excluído', 'ok');
+    } catch (e) {
+      throw e instanceof Error ? e : new Error('Erro ao excluir');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const persistUnits = useCallback(async () => {
     const updated = await saveUnits(act.id, unitsPayload(units));
     const allEffects: LegislativeEffect[] = units.flatMap((u) =>
@@ -447,6 +488,22 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 </Button>
               </Link>
             )}
+            <CompareModeToggle
+              active={compareMode}
+              hasOriginal={Boolean(originalFile)}
+              onToggle={() => {
+                if (!originalFile) {
+                  toast(
+                    'Anexe o arquivo original do ato nos Metadados para habilitar a comparação',
+                    'warn',
+                  );
+                  return;
+                }
+                setCompareMode(true);
+                setMobilePane('texto');
+              }}
+              onExit={() => setCompareMode(false)}
+            />
             {can('acts:version') &&
               act.statusPublicacao === 'publicado' &&
               !act.editionOpen && (
@@ -487,7 +544,13 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         </div>
       )}
 
-      <div className="grid flex-1 gap-6 overflow-auto p-6 lg:grid-cols-[340px_1fr]">
+      <div
+        className={cn(
+          'grid flex-1 gap-6 overflow-auto p-6',
+          compareMode ? 'lg:grid-cols-1' : 'lg:grid-cols-[340px_1fr]',
+        )}
+      >
+        {!compareMode && (
         <section className="space-y-4 rounded-[14px] border border-line bg-surface p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-section">Metadados</h2>
@@ -561,10 +624,78 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                   ))}
               </Select>
             </div>
-            <ActMetadataAttachments actId={act.id} editable={editable && can('acts:write')} />
+            <ActMetadataAttachments
+              actId={act.id}
+              editable={editable && can('acts:write')}
+              onOriginalChange={setOriginalFile}
+            />
           </div>
         </section>
+        )}
 
+        {compareMode && originalFile && (
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex gap-1 rounded-[10px] border border-line p-0.5 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMobilePane('original')}
+                className={cn(
+                  'rounded-[8px] px-3 py-1.5 text-[12.5px] font-semibold',
+                  mobilePane === 'original' ? 'bg-brand-soft text-brand' : 'text-ink-3',
+                )}
+              >
+                Arquivo original
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobilePane('texto')}
+                className={cn(
+                  'rounded-[8px] px-3 py-1.5 text-[12.5px] font-semibold',
+                  mobilePane === 'texto' ? 'bg-brand-soft text-brand' : 'text-ink-3',
+                )}
+              >
+                Texto estruturado
+              </button>
+            </div>
+            <label className="hidden items-center gap-2 text-[12px] text-ink-3 lg:flex">
+              Largura do original
+              <input
+                type="range"
+                min={28}
+                max={70}
+                value={splitPct}
+                onChange={(e) => setSplitPct(Number(e.target.value))}
+                className="w-36"
+              />
+            </label>
+          </div>
+        )}
+
+        <div
+          className={cn(
+            compareMode && originalFile && 'flex flex-col gap-3 lg:flex-row lg:items-stretch',
+          )}
+        >
+          {compareMode && originalFile && (
+            <div
+              className={cn('min-w-0', mobilePane !== 'original' && 'max-lg:hidden')}
+              style={{ flex: `0 0 ${splitPct}%` }}
+            >
+              <OriginalFilePane actId={act.id} attachment={originalFile} />
+            </div>
+          )}
+          <div
+            className={cn(
+              'min-w-0',
+              compareMode && originalFile && 'flex-1 overflow-y-auto',
+              compareMode && originalFile && mobilePane !== 'texto' && 'max-lg:hidden',
+            )}
+            style={
+              compareMode && originalFile
+                ? { maxHeight: 'min(72vh, 900px)' }
+                : undefined
+            }
+          >
         <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-section">Texto estruturado</h2>
@@ -644,15 +775,26 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                         {UNIT_TYPE_LABELS[unit.tipoUnidade]}
                       </Badge>
                       {editable && can('acts:write') && (
-                        <button
-                          type="button"
-                          onClick={() => setEditUnit(unit)}
-                          className="rounded p-1 text-ink-4 hover:bg-surface hover:text-brand"
-                          aria-label="Editar identificação, tipo e vínculo"
-                          title="Editar identificação, tipo e vínculo"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setEditUnit(unit)}
+                            className="touch-target rounded p-1 text-ink-4 hover:bg-surface hover:text-brand"
+                            aria-label="Editar identificação, tipo e vínculo"
+                            title="Editar identificação, tipo e vínculo"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(unit)}
+                            className="touch-target rounded p-1 text-ink-4 hover:bg-surface hover:text-danger"
+                            aria-label="Excluir elemento"
+                            title="Excluir elemento"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </>
                       )}
                       <Badge
                         variant={
@@ -837,7 +979,10 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               Adicionar elemento
             </Button>
           )}
+
         </section>
+          </div>
+        </div>
       </div>
 
       <AddUnitDialog
@@ -853,6 +998,14 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         units={units}
         onClose={() => setEditUnit(null)}
         onSave={applyUnitEdit}
+      />
+      <DeleteUnitDialog
+        open={Boolean(deleteTarget)}
+        unit={deleteTarget}
+        units={units}
+        busy={deleting}
+        onClose={() => !deleting && setDeleteTarget(null)}
+        onConfirm={handleDeleteUnit}
       />
     </>
   );

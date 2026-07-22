@@ -198,6 +198,22 @@ export function addUnit(
   }, token);
 }
 
+export function deleteUnit(
+  id: string,
+  unitId: string,
+  payload: {
+    mode: 'cascade' | 'reparent';
+    newParentId?: string | null;
+    confirmEffectCleanup?: boolean;
+  },
+  token?: string,
+) {
+  return adminFetch<ActDetail>(`/admin/acts/${id}/units/${unitId}`, {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  }, token);
+}
+
 export function submitForReview(id: string, token?: string) {
   return adminFetch<ActDetail>(`/admin/acts/${id}/submit-review`, { method: 'POST' }, token);
 }
@@ -560,6 +576,20 @@ export async function fetchImportFileUrl(importId: string): Promise<string> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) throw new Error('Não foi possível carregar o arquivo');
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export async function fetchActAttachmentFileUrl(
+  actId: string,
+  attachmentId: string,
+): Promise<string> {
+  const API_URL = getApiBaseUrl();
+  const token = readClientToken();
+  const res = await fetch(`${API_URL}/admin/acts/${actId}/attachments/${attachmentId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error('Não foi possível carregar o arquivo original');
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }

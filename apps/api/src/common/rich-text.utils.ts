@@ -1,6 +1,5 @@
 /**
- * HTML permitido nos textos das unidades: apenas <a href="...">...</a>.
- * Demais tags são removidas; o texto é preservado.
+ * HTML permitido nos textos das unidades: <a> e quebras de linha (<br> / \n).
  */
 
 export type TextAlign = 'left' | 'center' | 'right' | 'justify';
@@ -14,14 +13,6 @@ export type UnitFormatacao = {
   letterSpacing?: LetterSpacing;
 };
 
-export const DEFAULT_TEXTO_SIMPLES_FORMAT: UnitFormatacao = {
-  align: 'center',
-  bold: false,
-  italic: false,
-  underline: false,
-  letterSpacing: 'normal',
-};
-
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -30,21 +21,27 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function stripHtmlTags(value: string): string {
+export function htmlBlockToNewlines(value: string): string {
   return value
+    .replace(/\r\n/g, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+    .replace(/<(p|div|h[1-6]|li|tr)(\s[^>]*)?>/gi, '')
+    .replace(/&nbsp;/g, ' ');
+}
+
+export function stripHtmlTags(value: string): string {
+  return htmlBlockToNewlines(value)
     .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
 }
 
-/** Aceita URLs internas (/...), http(s) e mailto. Bloqueia javascript: etc. */
 export function sanitizeHref(url: string): string | null {
   const t = url.trim();
   if (!t) return null;
@@ -54,37 +51,39 @@ export function sanitizeHref(url: string): string | null {
   return null;
 }
 
-/**
- * Sanitiza HTML de unidade: escapa texto e mantém apenas âncoras seguras.
- */
 export function sanitizeUnitHtml(input: string): string {
   if (!input) return '';
-  if (!/<[a-z/]/i.test(input)) return input;
+
+  const normalizePlain = (text: string) =>
+    escapeHtml(text).replace(/\n/g, '<br>\n');
+
+  if (!/<[a-z/]/i.test(input)) {
+    return normalizePlain(input.replace(/\r\n/g, '\n'));
+  }
 
   const parts: string[] = [];
   const re = /<a\s+([^>]*?)>([\s\S]*?)<\/a>/gi;
   let last = 0;
   let match: RegExpExecArray | null;
   while ((match = re.exec(input)) !== null) {
-    parts.push(escapeHtml(stripHtmlTags(input.slice(last, match.index))));
+    parts.push(normalizePlain(stripHtmlTags(input.slice(last, match.index))));
     const attrs = match[1];
-    const inner = stripHtmlTags(match[2]);
+    const inner = stripHtmlTags(match[2]).replace(/\n/g, ' ').trim();
     const hrefMatch = attrs.match(/href\s*=\s*["']([^"']*)["']/i);
     const href = hrefMatch ? sanitizeHref(hrefMatch[1]) : null;
     if (href && inner) {
       const external = /^https?:\/\//i.test(href);
       const rel = external ? ' rel="noopener noreferrer" target="_blank"' : '';
       parts.push(`<a href="${escapeHtml(href)}"${rel}>${escapeHtml(inner)}</a>`);
-    } else {
+    } else if (inner) {
       parts.push(escapeHtml(inner));
     }
     last = match.index + match[0].length;
   }
-  parts.push(escapeHtml(stripHtmlTags(input.slice(last))));
-  return parts.join('');
+  parts.push(normalizePlain(stripHtmlTags(input.slice(last))));
+  return parts.join('').replace(/(?:<br>\n?){3,}/g, '<br>\n<br>\n');
 }
 
-/** Converte HTML sanitizado em texto puro (PDF / busca). */
 export function unitHtmlToPlainText(input: string): string {
   return stripHtmlTags(input);
 }

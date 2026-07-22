@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -18,6 +19,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import {
   AddUnitDto,
   CreateActDto,
+  DeleteUnitDto,
   SaveLegislativeEffectsDto,
   SaveUnitsDto,
   UpdateActDto,
@@ -155,6 +157,17 @@ export class AdminActsController {
   @RequirePermissions('acts:write')
   addUnit(@Param('id') id: string, @Body() dto: AddUnitDto, @CurrentUser() user: AuthUser) {
     return this.acts.addUnit(id, dto, user.id);
+  }
+
+  @Delete(':id/units/:unitId')
+  @RequirePermissions('acts:write')
+  deleteUnit(
+    @Param('id') id: string,
+    @Param('unitId') unitId: string,
+    @Body() dto: DeleteUnitDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.acts.deleteUnit(id, unitId, dto, user.id);
   }
 
   @Post(':id/submit-review')

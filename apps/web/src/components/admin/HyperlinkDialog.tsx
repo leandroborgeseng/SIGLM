@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link2, Search, Unlink } from 'lucide-react';
+import { ExternalLink, Link2, Search, Unlink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Form';
 import { searchActs } from '@/lib/api';
@@ -16,6 +16,7 @@ export function HyperlinkDialog({
   onClose,
   onApply,
   onRemove,
+  onOpen,
 }: {
   open: boolean;
   initialUrl?: string;
@@ -23,6 +24,7 @@ export function HyperlinkDialog({
   onClose: () => void;
   onApply: (url: string) => void;
   onRemove?: () => void;
+  onOpen?: () => void;
 }) {
   const [mode, setMode] = useState<'url' | 'search'>('url');
   const [url, setUrl] = useState(initialUrl);
@@ -126,6 +128,7 @@ export function HyperlinkDialog({
                   <button
                     type="button"
                     className="w-full rounded-[8px] border border-line-2 px-3 py-2 text-left hover:border-brand/40"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       const href = actUrl(act.slug);
                       setUrl(href);
@@ -143,7 +146,13 @@ export function HyperlinkDialog({
         )}
 
         <div className="mt-5 flex flex-wrap justify-between gap-2">
-          <div>
+          <div className="flex flex-wrap gap-1">
+            {onOpen && initialUrl && (
+              <Button variant="ghost" size="sm" onClick={onOpen}>
+                <ExternalLink className="h-3.5 w-3.5" />
+                Abrir link
+              </Button>
+            )}
             {onRemove && initialUrl && (
               <Button variant="ghost" size="sm" onClick={onRemove}>
                 <Unlink className="h-3.5 w-3.5" />
@@ -159,6 +168,7 @@ export function HyperlinkDialog({
               <Button
                 size="sm"
                 disabled={!canApply || !selectedText}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   const href = sanitizeHref(url);
                   if (!href) return;

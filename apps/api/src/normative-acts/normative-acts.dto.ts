@@ -253,3 +253,18 @@ export class AddUnitDto {
   @Type(() => UnitFormatacaoDto)
   formatacao?: UnitFormatacaoDto | null;
 }
+
+export class DeleteUnitDto {
+  /** cascade = remove subordinados; reparent = reposiciona filhos no pai do excluído (ou null). */
+  @IsIn(['cascade', 'reparent'])
+  mode!: 'cascade' | 'reparent';
+
+  @IsOptional()
+  @IsString()
+  newParentId?: string | null;
+
+  /** Confirma remoção/nulificação de vínculos em efeitos legislativos. */
+  @IsOptional()
+  @IsBoolean()
+  confirmEffectCleanup?: boolean;
+}

@@ -147,10 +147,14 @@ export function renderConsolidatedHtml(act: ExportAct): string {
     * { box-sizing: border-box; }
     body { margin: 0; padding: 2rem 1.25rem 3rem; font-family: Georgia, "Times New Roman", serif; color: var(--ink); background: #fff; line-height: 1.75; font-size: 15px; }
     a { color: var(--brand); text-decoration: underline; }
-    .brand { text-align: center; font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink-3); margin-bottom: 1.5rem; }
+    .brand-lockup { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 1.5rem; text-align: left; }
+    .brand-lockup img { height: 72px; width: auto; }
+    .brand-lockup .prefeitura { font-family: system-ui, sans-serif; font-size: 15px; font-weight: 600; color: var(--ink); margin: 0; }
+    .brand-lockup .orgao { font-family: system-ui, sans-serif; font-size: 13px; font-weight: 500; color: var(--ink-2); margin: .15rem 0 0; }
     .header { max-width: 900px; margin: 0 auto 1.75rem; }
     .titulo-formal { text-align: center; font-size: 16px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; margin: 0 0 1rem; }
-    .ementa { text-align: right; font-size: 14px; font-weight: 400; line-height: 1.55; margin: 0 0 1.25rem; max-width: 72%; margin-left: auto; }
+    .ementa { text-align: left; font-size: 14px; font-weight: 400; line-height: 1.55; margin: 0 0 1.25rem; max-width: 50%; margin-left: auto; white-space: pre-wrap; }
+    .preamble, .article, .indent, .texto-simples { white-space: pre-wrap; }
     .meta-line { font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink-3); text-align: center; margin: 0 0 1.5rem; }
     .content { max-width: 900px; margin: 0 auto; }
     .preamble { text-align: justify; color: var(--ink); margin: 1rem 0 1.5rem; }
@@ -171,11 +175,17 @@ export function renderConsolidatedHtml(act: ExportAct): string {
   </style>
 </head>
 <body>
-  <p class="brand">Prefeitura Municipal de Franca/SP · Portal de Legislação</p>
   <header class="header">
-    <h1 class="titulo-formal">${escapeHtml(tituloFormal)}</h1>
-    ${hasEmentaUnit ? '' : `<p class="ementa">${escapeHtml(act.ementa)}</p>`}
     <p class="meta-line">${escapeHtml(codigo)} · ${escapeHtml(situacao)}</p>
+    <div class="brand-lockup">
+      <img src="/brand/franca-brasao.png" alt="Brasão da Prefeitura Municipal de Franca" />
+      <div>
+        <p class="prefeitura">Prefeitura Municipal de Franca/SP</p>
+        ${act.orgaoOrigem ? `<p class="orgao">${escapeHtml(act.orgaoOrigem)}</p>` : ''}
+      </div>
+    </div>
+    <h1 class="titulo-formal">${escapeHtml(tituloFormal)}</h1>
+    ${hasEmentaUnit ? '' : `<p class="ementa">${escapeHtml(act.ementa).replace(/\n/g, '<br>\n')}</p>`}
   </header>
   <main class="content">
 ${unitsHtml}

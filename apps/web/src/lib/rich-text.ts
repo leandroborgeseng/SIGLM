@@ -1,5 +1,5 @@
 /**
- * HTML permitido nos textos das unidades: apenas <a href="...">...</a>.
+ * HTML permitido nos textos das unidades: <a> e quebras de linha (<br> / \n).
  */
 
 export type TextAlign = 'left' | 'center' | 'right' | 'justify';
@@ -29,18 +29,26 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function stripHtmlTags(value: string): string {
+/** Converte marcações de bloco HTML em quebras de linha, preservando o texto. */
+export function htmlBlockToNewlines(value: string): string {
   return value
+    .replace(/\r\n/g, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+    .replace(/<(p|div|h[1-6]|li|tr)(\s[^>]*)?>/gi, '')
+    .replace(/&nbsp;/g, ' ');
+}
+
+export function stripHtmlTags(value: string): string {
+  return htmlBlockToNewlines(value)
     .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
 }
 
 export function sanitizeHref(url: string): string | null {
@@ -52,35 +60,51 @@ export function sanitizeHref(url: string): string | null {
   return null;
 }
 
+/**
+ * Escapa texto preservando \n como <br>, mantendo apenas âncoras seguras.
+ * Assim o conteúdo sobrevive a contentEditable, HTML público e PDF.
+ */
 export function sanitizeUnitHtml(input: string): string {
   if (!input) return '';
-  if (!/<[a-z/]/i.test(input)) return input;
+
+  const normalizePlain = (text: string) =>
+    escapeHtml(text).replace(/\n/g, '<br>\n');
+
+  if (!/<[a-z/]/i.test(input)) {
+    return normalizePlain(input.replace(/\r\n/g, '\n'));
+  }
 
   const parts: string[] = [];
   const re = /<a\s+([^>]*?)>([\s\S]*?)<\/a>/gi;
   let last = 0;
   let match: RegExpExecArray | null;
   while ((match = re.exec(input)) !== null) {
-    parts.push(escapeHtml(stripHtmlTags(input.slice(last, match.index))));
+    parts.push(normalizePlain(stripHtmlTags(input.slice(last, match.index))));
     const attrs = match[1];
-    const inner = stripHtmlTags(match[2]);
+    const inner = stripHtmlTags(match[2]).replace(/\n/g, ' ').trim();
     const hrefMatch = attrs.match(/href\s*=\s*["']([^"']*)["']/i);
     const href = hrefMatch ? sanitizeHref(hrefMatch[1]) : null;
     if (href && inner) {
       const external = /^https?:\/\//i.test(href);
       const rel = external ? ' rel="noopener noreferrer" target="_blank"' : '';
       parts.push(`<a href="${escapeHtml(href)}"${rel}>${escapeHtml(inner)}</a>`);
-    } else {
+    } else if (inner) {
       parts.push(escapeHtml(inner));
     }
     last = match.index + match[0].length;
   }
-  parts.push(escapeHtml(stripHtmlTags(input.slice(last))));
-  return parts.join('');
+  parts.push(normalizePlain(stripHtmlTags(input.slice(last))));
+  return parts.join('').replace(/(?:<br>\n?){3,}/g, '<br>\n<br>\n');
 }
 
+/** Texto puro (PDF / busca), preservando quebras. */
 export function unitHtmlToPlainText(input: string): string {
   return stripHtmlTags(input);
+}
+
+/** Para contentEditable: garante que \n do banco vire <br> visível. */
+export function unitTextToEditorHtml(input: string): string {
+  return sanitizeUnitHtml(input || '');
 }
 
 export function parseFormatacao(value: unknown): UnitFormatacao | null {

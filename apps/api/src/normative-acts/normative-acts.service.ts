@@ -14,7 +14,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConsolidationService } from '../consolidation/consolidation.service';
-import { AddUnitDto, CreateActDto, SaveLegislativeEffectsDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
+import { AddUnitDto, CreateActDto, DeleteUnitDto, SaveLegislativeEffectsDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
 import { buildActSlug, formatActCode, formatFormalTitle, parseSlug } from './normative-acts.utils';
 import {
   buildActSnapshot,
@@ -917,6 +917,160 @@ export class NormativeActsService {
       userId,
       acao: 'incluir_elemento',
       resumo: `Incluiu ${dto.tipoUnidade}${dto.identificacao ? ` (${dto.identificacao})` : ''}`,
+      withSnapshot: true,
+    });
+
+    return this.getAdminById(actId);
+  }
+
+  async deleteUnit(actId: string, unitId: string, dto: DeleteUnitDto, userId?: string) {
+    const act = await this.ensureAct(actId);
+    this.assertEditable(act);
+
+    const units = [...act.units].sort((a, b) => a.ordem - b.ordem);
+    const unit = units.find((u) => u.id === unitId);
+    if (!unit) throw new NotFoundException('Elemento não encontrado');
+
+    const subtreeIds = this.collectSubtreeIds(unitId, units);
+    const children = units.filter((u) => u.parentUnitId === unitId);
+    const toDeleteIds =
+      dto.mode === 'cascade' ? [...subtreeIds] : [unitId];
+
+    if (dto.mode === 'reparent' && children.length > 0) {
+      const newParentId = dto.newParentId === undefined ? unit.parentUnitId : dto.newParentId;
+      if (newParentId) {
+        if (toDeleteIds.includes(newParentId) || newParentId === unitId) {
+          throw new BadRequestException('Novo vínculo inválido para os elementos subordinados');
+        }
+        if (!units.some((u) => u.id === newParentId)) {
+          throw new BadRequestException('Elemento pai informado não encontrado');
+        }
+      }
+    }
+
+    const blockingEffects = await this.prisma.legislativeEffect.findMany({
+      where: {
+        OR: [
+          { sourceUnitId: { in: toDeleteIds } },
+          { targetUnitId: { in: toDeleteIds } },
+          { referenciaUnitId: { in: toDeleteIds } },
+          { redacaoUnitId: { in: toDeleteIds } },
+        ],
+      },
+      select: {
+        id: true,
+        sourceUnitId: true,
+        targetUnitId: true,
+        referenciaUnitId: true,
+        redacaoUnitId: true,
+        tipoEfeito: true,
+      },
+    });
+
+    const asSource = blockingEffects.filter((e) => toDeleteIds.includes(e.sourceUnitId));
+    if (asSource.length > 0) {
+      throw new BadRequestException(
+        `Não é possível excluir: o elemento (ou subordinados) é origem de ${asSource.length} efeito(s) legislativo(s). Remova ou redistribua esses efeitos antes.`,
+      );
+    }
+
+    const asRef = blockingEffects.filter(
+      (e) =>
+        (e.targetUnitId && toDeleteIds.includes(e.targetUnitId)) ||
+        (e.referenciaUnitId && toDeleteIds.includes(e.referenciaUnitId)) ||
+        (e.redacaoUnitId && toDeleteIds.includes(e.redacaoUnitId)),
+    );
+    if (asRef.length > 0 && !dto.confirmEffectCleanup) {
+      throw new BadRequestException(
+        `Há ${asRef.length} efeito(s) legislativo(s) referenciando este elemento. Confirme a limpeza desses vínculos (confirmEffectCleanup) ou ajuste-os antes.`,
+      );
+    }
+
+    const changesCount = await this.prisma.normativeChange.count({
+      where: { unitId: { in: toDeleteIds } },
+    });
+    if (changesCount > 0) {
+      throw new BadRequestException(
+        'Não é possível excluir: há registros de consolidação legislativa vinculados a este elemento. A exclusão administrativa não deve apagar o histórico público.',
+      );
+    }
+
+    const subordinateNote =
+      children.length === 0
+        ? ''
+        : dto.mode === 'cascade'
+          ? ` (+ ${subtreeIds.size - 1} subordinado(s))`
+          : ` (revinculando ${children.length} filho(s))`;
+    const label = `${unit.identificacao ?? unit.tipoUnidade}${subordinateNote}`;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (asRef.length > 0) {
+        await tx.legislativeEffect.updateMany({
+          where: { targetUnitId: { in: toDeleteIds } },
+          data: { targetUnitId: null },
+        });
+        await tx.legislativeEffect.updateMany({
+          where: { referenciaUnitId: { in: toDeleteIds } },
+          data: { referenciaUnitId: null },
+        });
+        await tx.legislativeEffect.updateMany({
+          where: { redacaoUnitId: { in: toDeleteIds } },
+          data: { redacaoUnitId: null },
+        });
+      }
+
+      if (dto.mode === 'reparent' && children.length > 0) {
+        const newParentId =
+          dto.newParentId === undefined ? unit.parentUnitId ?? null : dto.newParentId ?? null;
+        await tx.normativeUnit.updateMany({
+          where: { parentUnitId: unitId },
+          data: { parentUnitId: newParentId },
+        });
+      }
+
+      // Remove versões e o(s) elemento(s). Filhos em cascade já estão em toDeleteIds.
+      await tx.normativeVersion.deleteMany({ where: { unitId: { in: toDeleteIds } } });
+
+      // Apaga folhas primeiro para respeitar FK de hierarquia
+      const remaining = new Set(toDeleteIds);
+      while (remaining.size > 0) {
+        const leafIds = [...remaining].filter((id) => {
+          const stillHasChild = units.some(
+            (u) => remaining.has(u.id) && u.parentUnitId === id && u.id !== id,
+          );
+          return !stillHasChild;
+        });
+        if (leafIds.length === 0) break;
+        await tx.normativeUnit.deleteMany({ where: { id: { in: leafIds } } });
+        for (const id of leafIds) remaining.delete(id);
+      }
+
+      const survivors = await tx.normativeUnit.findMany({
+        where: { actId },
+        orderBy: { ordem: 'asc' },
+      });
+      for (let i = 0; i < survivors.length; i++) {
+        if (survivors[i].ordem !== i) {
+          await tx.normativeUnit.update({
+            where: { id: survivors[i].id },
+            data: { ordem: i },
+          });
+        }
+      }
+
+      if (unit.tipoUnidade === UnitType.ementa) {
+        await tx.normativeAct.update({
+          where: { id: actId },
+          data: { ementa: 'Ementa pendente' },
+        });
+      }
+    });
+
+    await recordInternalHistory(this.prisma, {
+      actId,
+      userId,
+      acao: 'excluir_elemento',
+      resumo: `Excluiu ${label} (${dto.mode})`,
       withSnapshot: true,
     });
 

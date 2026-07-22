@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
+import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatActCode, formatFormalTitle, SITUACAO_LABELS, parseSlug } from '../normative-acts/normative-acts.utils';
@@ -10,6 +11,12 @@ import { parseFormatacao } from '../common/rich-text.utils';
 const dejavuRoot = path.dirname(require.resolve('dejavu-fonts-ttf/package.json'));
 const DEJAVU_SERIF = path.join(dejavuRoot, 'ttf/DejaVuSerif.ttf');
 const DEJAVU_BOLD = path.join(dejavuRoot, 'ttf/DejaVuSerif-Bold.ttf');
+const BRASAO_PATH = path.resolve(
+  process.cwd(),
+  process.cwd().endsWith(`${path.sep}apps${path.sep}api`)
+    ? '../web/public/brand/franca-brasao.png'
+    : 'apps/web/public/brand/franca-brasao.png',
+);
 
 @Injectable()
 export class ExportService {
@@ -84,17 +91,8 @@ export class ExportService {
       doc.registerFont('serif', DEJAVU_SERIF);
       doc.registerFont('serif-bold', DEJAVU_BOLD);
 
-      doc.font('serif').fontSize(10).fillColor('#647389').text('Prefeitura Municipal de Franca/SP', {
-        align: 'center',
-      });
-      doc.moveDown(0.75);
-      const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
-      doc.font('serif-bold').fontSize(13).fillColor('#0F1B2D').text(tituloFormal, { align: 'center' });
-      doc.moveDown(0.6);
-      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(act.ementa, { align: 'right' });
-      doc.moveDown(0.5);
       doc.font('serif').fontSize(9).fillColor('#647389');
-      const meta = [
+      const metaTop = [
         act.codigo,
         SITUACAO_LABELS[act.situacao],
         act.dataAto
@@ -103,9 +101,57 @@ export class ExportService {
         act.dataPublicacao
           ? `Pub.: ${act.dataPublicacao.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}`
           : null,
-        act.orgaoOrigem ? `Órgão: ${act.orgaoOrigem}` : null,
       ].filter(Boolean);
-      if (meta.length) doc.text(meta.join('  ·  '), { align: 'center' });
+      if (metaTop.length) {
+        doc.text(metaTop.join('  ·  '), { align: 'left' });
+        doc.moveDown(0.6);
+      }
+
+      const headerTop = doc.y;
+      const brasaoH = 52;
+      const brasaoW = Math.round(brasaoH * (1022 / 870));
+      try {
+        if (fs.existsSync(BRASAO_PATH)) {
+          doc.image(BRASAO_PATH, doc.page.margins.left, headerTop, {
+            height: brasaoH,
+            width: brasaoW,
+          });
+        }
+      } catch {
+        /* brasão opcional no PDF */
+      }
+      const textX = doc.page.margins.left + brasaoW + 12;
+      const textWidth = doc.page.width - doc.page.margins.right - textX;
+      doc.font('serif-bold').fontSize(12).fillColor('#0F1B2D');
+      doc.text('Prefeitura Municipal de Franca/SP', textX, headerTop + 8, {
+        width: textWidth,
+        align: 'left',
+      });
+      if (act.orgaoOrigem) {
+        doc.font('serif').fontSize(9).fillColor('#36465B').text(act.orgaoOrigem, textX, doc.y, {
+          width: textWidth,
+          align: 'left',
+        });
+      }
+      doc.y = Math.max(doc.y, headerTop + brasaoH) + 12;
+      doc.x = doc.page.margins.left;
+
+      const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
+      doc.font('serif-bold').fontSize(13).fillColor('#0F1B2D').text(tituloFormal, { align: 'center' });
+      doc.moveDown(0.6);
+      const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const ementaWidth = pageWidth * 0.5;
+      const ementaX = doc.page.margins.left + (pageWidth - ementaWidth);
+      const ementaY = doc.y;
+      const ementaUnit = act.units.find((u) => u.tipoUnidade === 'ementa');
+      const ementaText = ementaUnit
+        ? unitHtmlToPlainText(ementaUnit.texto)
+        : unitHtmlToPlainText(act.ementa);
+      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(ementaText, ementaX, ementaY, {
+        width: ementaWidth,
+        align: 'left',
+      });
+      doc.x = doc.page.margins.left;
       doc.moveDown(1);
 
       for (const unit of sortUnitsForDisplay(act.units)) {

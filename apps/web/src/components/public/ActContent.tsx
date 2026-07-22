@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { FrancaMark } from '@/components/brand/FrancaMark';
+import { FrancaBrasao } from '@/components/brand/FrancaBrasao';
 import { getApiBaseUrl } from '@/lib/api-url';
 import { cn, formatDate, formatFormalTitle } from '@/lib/format';
 import { formatacaoClassNames, sanitizeUnitHtml } from '@/lib/rich-text';
@@ -57,7 +57,10 @@ function RichHtml({ html, className }: { html: string; className?: string }) {
   const safe = sanitizeUnitHtml(html);
   return (
     <span
-      className={cn('[&_a]:text-[#0066cc] [&_a]:underline hover:[&_a]:opacity-90', className)}
+      className={cn(
+        'whitespace-pre-wrap [&_a]:text-[#0066cc] [&_a]:underline hover:[&_a]:opacity-90',
+        className,
+      )}
       dangerouslySetInnerHTML={{ __html: safe }}
     />
   );
@@ -126,12 +129,15 @@ function UnitBlock({
 
   if (isEmenta) {
     return (
-      <article id={anchorId} className="mb-5 ml-auto max-w-[min(100%,36rem)] text-right">
-        <p className="text-[14.5px] leading-relaxed text-ink">
+      <article
+        id={anchorId}
+        className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] text-left sm:w-[min(100%,50%)]"
+      >
+        <p className="text-left text-[14.5px] leading-relaxed text-ink">
           <RichHtml html={texto} />
         </p>
         {mode === 'consolidado' && unit.nota && (
-          <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
+          <p className={cn('mt-1 text-left text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
         )}
       </article>
     );
@@ -228,27 +234,9 @@ export function ActContent({ act }: { act: ActDetail }) {
 
   return (
     <div className="bg-white text-ink">
-      <header className="mb-8">
-        <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <FrancaMark size={56} priority />
-          <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-3">
-            Prefeitura Municipal de Franca/SP
-          </p>
-        </div>
-
-        <h1 className="mb-4 text-center text-[17px] font-bold uppercase leading-snug tracking-wide text-ink sm:text-[18px]">
-          {tituloFormal}
-        </h1>
-
-        {tab !== 'historico' && ementaUnit ? (
-          <UnitBlock unit={ementaUnit} mode={tab} />
-        ) : tab !== 'historico' && act.ementa ? (
-          <p className="ml-auto mb-5 max-w-[min(100%,36rem)] text-right text-[14.5px] leading-relaxed text-ink">
-            {act.ementa}
-          </p>
-        ) : null}
-
-        <p className="no-print text-center text-[12px] text-ink-3">
+      {/* Auxiliares de navegação — fora do texto oficial */}
+      <div className="no-print mb-6 space-y-3 border-b border-line/60 pb-4">
+        <p className="text-center text-[12px] text-ink-3 sm:text-left">
           {act.codigo}
           <span className="mx-1.5">·</span>
           {act.situacao.replace(/_/g, ' ')}
@@ -264,6 +252,65 @@ export function ActContent({ act }: { act: ActDetail }) {
           Pub.: {formatDate(act.dataPublicacao)}
         </p>
 
+        {tab !== 'historico' && articles.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setTocOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-[14px] text-brand hover:underline"
+              aria-expanded={tocOpen}
+            >
+              Sumário
+              <ChevronDown
+                className={cn('h-4 w-4 transition-transform', tocOpen && 'rotate-180')}
+                aria-hidden
+              />
+            </button>
+            {tocOpen && (
+              <ul className="mt-3 space-y-1 pl-1">
+                {articles.map((u) => (
+                  <li key={u.id}>
+                    <a
+                      href={`#${u.identificacao?.replace(/\s+/g, '-').toLowerCase()}`}
+                      className="text-[14px] text-brand hover:underline"
+                    >
+                      {u.identificacao}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+
+      <header className="mb-8">
+        <div className="mb-6 flex flex-col items-center gap-3 text-center sm:flex-row sm:items-center sm:justify-center sm:gap-4 sm:text-left">
+          <FrancaBrasao size={78} priority />
+          <div className="min-w-0 leading-snug">
+            <p className="text-[14px] font-semibold tracking-wide text-ink sm:text-[15px]">
+              Prefeitura Municipal de Franca/SP
+            </p>
+            {act.orgaoOrigem ? (
+              <p className="mt-0.5 text-[12.5px] font-medium text-ink-2 sm:text-[13px]">
+                {act.orgaoOrigem}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <h1 className="mb-4 text-center text-[17px] font-bold uppercase leading-snug tracking-wide text-ink sm:text-[18px]">
+          {tituloFormal}
+        </h1>
+
+        {tab !== 'historico' && ementaUnit ? (
+          <UnitBlock unit={ementaUnit} mode={tab} />
+        ) : tab !== 'historico' && act.ementa ? (
+          <p className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] whitespace-pre-wrap text-left text-[14.5px] leading-relaxed text-ink sm:w-[min(100%,50%)]">
+            {act.ementa}
+          </p>
+        ) : null}
+
         {(act.anexosTopo?.length ?? 0) > 0 && (
           <ul className="mt-5 space-y-1.5 border-t border-line/50 pt-4">
             {act.anexosTopo!.map((item) => (
@@ -274,37 +321,6 @@ export function ActContent({ act }: { act: ActDetail }) {
           </ul>
         )}
       </header>
-
-      {tab !== 'historico' && articles.length > 0 && (
-        <div className="no-print mb-6 border-b border-line/60 pb-2">
-          <button
-            type="button"
-            onClick={() => setTocOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 text-[14px] text-brand hover:underline"
-            aria-expanded={tocOpen}
-          >
-            Sumário
-            <ChevronDown
-              className={cn('h-4 w-4 transition-transform', tocOpen && 'rotate-180')}
-              aria-hidden
-            />
-          </button>
-          {tocOpen && (
-            <ul className="mt-3 space-y-1 pl-1">
-              {articles.map((u) => (
-                <li key={u.id}>
-                  <a
-                    href={`#${u.identificacao?.replace(/\s+/g, '-').toLowerCase()}`}
-                    className="text-[14px] text-brand hover:underline"
-                  >
-                    {u.identificacao}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
 
       <div className="min-w-0">
         {tab === 'historico' ? (

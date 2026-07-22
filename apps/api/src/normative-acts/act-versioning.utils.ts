@@ -185,7 +185,13 @@ export function diffSnapshots(a: ActSnapshot, b: ActSnapshot) {
     .map((u) => {
       const prev = aUnits.get(u.id)!;
       const fields: string[] = [];
-      if (prev.texto !== u.texto) fields.push('texto');
+      if (prev.texto !== u.texto) {
+        fields.push('texto');
+        const linkRe = /<a\s[^>]*href\s*=\s*["'][^"']+["'][^>]*>/gi;
+        const prevLinks = [...(prev.texto.match(linkRe) ?? [])].sort().join('|');
+        const nextLinks = [...(u.texto.match(linkRe) ?? [])].sort().join('|');
+        if (prevLinks !== nextLinks) fields.push('hiperlink');
+      }
       if (JSON.stringify(prev.formatacao) !== JSON.stringify(u.formatacao)) fields.push('formatacao');
       if (prev.identificacao !== u.identificacao) fields.push('identificacao');
       if (prev.tipoUnidade !== u.tipoUnidade) fields.push('tipoUnidade');
