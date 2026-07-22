@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { SkipLink } from '@/components/a11y/SkipLink';
 import { ActActions } from '@/components/public/ActActions';
 import { ActContent } from '@/components/public/ActContent';
 import { PublicBottomNav } from '@/components/public/PublicBottomNav';
@@ -33,11 +32,8 @@ export default async function ActPage({ params }: Props) {
     notFound();
   }
 
-  const pdf = act.attachments.find((a) => a.tipo === 'pdf_original');
-
   return (
     <>
-      <SkipLink />
       <div className="min-h-dvh bg-white pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
         <div className="no-print border-b border-line/70 bg-white">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
@@ -47,7 +43,7 @@ export default async function ActPage({ params }: Props) {
             >
               ← Voltar à busca
             </Link>
-            <ActActions tipo={tipo} ano={ano} numero={numero} diarioUrl={pdf?.downloadUrl} />
+            <ActActions tipo={tipo} ano={ano} numero={numero} />
           </div>
         </div>
 

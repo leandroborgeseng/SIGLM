@@ -16,6 +16,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConsolidationService } from '../consolidation/consolidation.service';
 import { AddUnitDto, CreateActDto, SaveLegislativeEffectsDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
 import { buildActSlug, formatActCode, formatFormalTitle, parseSlug } from './normative-acts.utils';
+import {
+  buildActSnapshot,
+  diffSnapshots,
+  recordInternalHistory,
+  type ActSnapshot,
+} from './act-versioning.utils';
 import { defaultIdentificacao, validateUnitsHierarchy } from './unit-hierarchy.utils';
 import {
   buildFtsFilterSql,
@@ -23,6 +29,7 @@ import {
   parseNumeroSearch,
   refreshSearchVector,
 } from './search.utils';
+import { parseFormatacao, sanitizeUnitHtml } from '../common/rich-text.utils';
 
 export interface SearchActsQuery {
   q?: string;
@@ -296,7 +303,67 @@ export class NormativeActsService {
 
     if (!act) throw new NotFoundException('Ato normativo não encontrado');
 
-    const unitIds = act.units.map((u) => u.id);
+    // Enquanto houver versão de trabalho aberta, a consulta pública exibe a última revisão publicada
+    let publicUnits = act.units;
+    let publicEmenta = act.ementa;
+    let publicAssunto = act.assunto;
+    let publicDataAto = act.dataAto;
+    let publicSituacao = act.situacao;
+    let publicOrgao = act.orgao?.nome ?? act.orgaoOrigem;
+    let publicAttachments = act.attachments;
+
+    if (act.editionOpen) {
+      const currentRev = await this.prisma.actPublicRevision.findFirst({
+        where: { actId: act.id, isCurrent: true },
+      });
+      const snap = currentRev?.snapshot as ActSnapshot | null;
+      if (snap?.units?.length) {
+        publicUnits = snap.units.map((u) => ({
+          id: u.id,
+          actId: act.id,
+          tipoUnidade: u.tipoUnidade as UnitType,
+          identificacao: u.identificacao,
+          texto: u.texto,
+          formatacao: (u as { formatacao?: unknown }).formatacao ?? null,
+          ordem: u.ordem,
+          parentUnitId: u.parentUnitId,
+          status: u.status as UnitStatus,
+          origemActId: act.id,
+          alteradoPorActId: null,
+          createdAt: act.createdAt,
+          updatedAt: act.updatedAt,
+        })) as typeof act.units;
+        publicEmenta = snap.metadata.ementa ?? act.ementa;
+        publicAssunto = snap.metadata.assunto ?? act.assunto;
+        publicDataAto = snap.metadata.dataAto ? new Date(snap.metadata.dataAto) : act.dataAto;
+        publicSituacao = (snap.metadata.situacao as ActSituacao) ?? act.situacao;
+        publicOrgao = snap.metadata.orgaoOrigem ?? publicOrgao;
+      }
+      if (snap?.attachments?.length) {
+        publicAttachments = snap.attachments.map((a) => ({
+          id: a.id,
+          actId: act.id,
+          tipo: a.tipo as (typeof act.attachments)[number]['tipo'],
+          url: a.url,
+          nome: a.nome,
+          titulo: a.titulo,
+          href: a.href,
+          ordem: a.ordem,
+          ativo: a.ativo,
+          tamanho: null,
+          hash: null,
+          criadoEm: act.createdAt,
+          substituidoEm: null,
+        })) as typeof act.attachments;
+      }
+    }
+
+    const ementaFromUnit = publicUnits.find((u) => u.tipoUnidade === UnitType.ementa);
+    if (ementaFromUnit?.texto) {
+      publicEmenta = ementaFromUnit.texto.replace(/<[^>]+>/g, '').trim() || publicEmenta;
+    }
+
+    const unitIds = publicUnits.map((u) => u.id);
     const versions = await this.prisma.normativeVersion.findMany({
       where: { unitId: { in: unitIds } },
       orderBy: { validoDe: 'asc' },
@@ -307,7 +374,7 @@ export class NormativeActsService {
       return acc;
     }, {});
 
-    const unitsWithNotes = act.units.map((unit) => {
+    const unitsWithNotes = publicUnits.map((unit) => {
       const change = act.changesAsAlterada.find((c) => c.unitId === unit.id);
       return {
         ...unit,
@@ -316,6 +383,7 @@ export class NormativeActsService {
       };
     });
 
+    // Histórico público = apenas consolidação legislativa (NormativeChange), nunca histórico interno
     const history = act.changesAsAlterada.map((change) => ({
       id: change.id,
       data: change.data,
@@ -335,22 +403,44 @@ export class NormativeActsService {
         : null,
     }));
 
-    return {
-      ...act,
-      orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
-      codigo: formatActCode(act.tipo, act.numero, act.ano),
-      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
-      units: unitsWithNotes,
-      history,
-      attachments: act.attachments.map((a) => ({
+    const attachmentPayload = publicAttachments
+      .filter((a) => a.ativo)
+      .sort((a, b) => a.ordem - b.ordem || a.criadoEm.getTime() - b.criadoEm.getTime())
+      .map((a) => ({
         id: a.id,
         tipo: a.tipo,
         url: a.url,
         nome: a.nome,
-        downloadUrl: `/public/attachments/${a.id}/file`,
-      })),
+        titulo: a.titulo ?? a.nome,
+        href: a.href,
+        ordem: a.ordem,
+        downloadUrl: a.url ? `/public/attachments/${a.id}/file` : null,
+      }));
+
+    const originalFile =
+      attachmentPayload.find((a) => a.tipo === 'pdf_original' || a.tipo === 'digitalizado') ??
+      null;
+    const anexosTopo = attachmentPayload.filter((a) => a.tipo === 'anexo_topo');
+    const anexosFinal = attachmentPayload.filter((a) => a.tipo === 'anexo_final');
+
+    return {
+      ...act,
+      ementa: publicEmenta,
+      assunto: publicAssunto,
+      dataAto: publicDataAto,
+      situacao: publicSituacao,
+      orgaoOrigem: publicOrgao,
+      codigo: formatActCode(act.tipo, act.numero, act.ano),
+      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, publicDataAto),
+      units: unitsWithNotes,
+      history,
+      attachments: attachmentPayload,
+      arquivoOriginal: originalFile,
+      anexosTopo,
+      anexosFinal,
       changesAsAlterada: undefined,
       orgao: undefined,
+      editionOpen: undefined,
     };
   }
 
@@ -447,6 +537,33 @@ export class NormativeActsService {
       codigo: formatActCode(act.tipo, act.numero, act.ano),
       tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
       hierarchyValid: this.validateHierarchy(act.units),
+      attachments: act.attachments.map((a) => ({
+        id: a.id,
+        tipo: a.tipo,
+        url: a.url,
+        nome: a.nome,
+        titulo: a.titulo ?? a.nome,
+        href: a.href,
+        ordem: a.ordem,
+        ativo: a.ativo,
+        tamanho: a.tamanho,
+        criadoEm: a.criadoEm.toISOString(),
+        substituidoEm: a.substituidoEm?.toISOString() ?? null,
+        downloadUrl: a.url ? `/public/attachments/${a.id}/file` : null,
+        adminDownloadUrl: a.url ? `/admin/acts/${act.id}/attachments/${a.id}/file` : null,
+        directLink: a.url ? `/public/attachments/${a.id}/file` : a.href,
+      })),
+      arquivoOriginal:
+        act.attachments.find(
+          (a) =>
+            a.ativo && (a.tipo === 'pdf_original' || a.tipo === 'digitalizado'),
+        ) ?? null,
+      anexosTopo: act.attachments
+        .filter((a) => a.ativo && a.tipo === 'anexo_topo')
+        .sort((a, b) => a.ordem - b.ordem),
+      anexosFinal: act.attachments
+        .filter((a) => a.ativo && a.tipo === 'anexo_final')
+        .sort((a, b) => a.ordem - b.ordem),
       units: act.units.map((unit) => ({
         ...unit,
         versoes: versionsByUnit[unit.id] ?? [],
@@ -471,11 +588,9 @@ export class NormativeActsService {
     };
   }
 
-  async saveLegislativeEffects(actId: string, dto: SaveLegislativeEffectsDto) {
+  async saveLegislativeEffects(actId: string, dto: SaveLegislativeEffectsDto, userId?: string) {
     const act = await this.ensureAct(actId);
-    if (act.statusPublicacao === PublicationStatus.publicado) {
-      throw new BadRequestException('Ato publicado — efeitos não podem ser alterados');
-    }
+    this.assertEditable(act);
 
     const unitIds = new Set(act.units.map((u) => u.id));
 
@@ -506,6 +621,14 @@ export class NormativeActsService {
           },
         });
       }
+    });
+
+    await recordInternalHistory(this.prisma, {
+      actId,
+      userId,
+      acao: 'efeitos_legislativos',
+      resumo: 'Alterou efeitos legislativos',
+      withSnapshot: true,
     });
 
     return this.getAdminById(actId);
@@ -545,7 +668,7 @@ export class NormativeActsService {
         tipo: dto.tipo,
         numero: dto.numero,
         ano,
-        ementa: dto.ementa,
+        ementa: dto.ementa?.trim() || 'Ementa pendente',
         assunto: dto.assunto,
         dataAto,
         dataPublicacao: dto.dataPublicacao ? new Date(dto.dataPublicacao) : undefined,
@@ -558,6 +681,13 @@ export class NormativeActsService {
       },
     });
 
+    await recordInternalHistory(this.prisma, {
+      actId: act.id,
+      acao: 'criar_ato',
+      resumo: 'Criou ato normativo (rascunho)',
+      withSnapshot: true,
+    });
+
     return {
       ...act,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
@@ -567,8 +697,9 @@ export class NormativeActsService {
     };
   }
 
-  async updateAct(id: string, dto: UpdateActDto) {
-    await this.ensureAct(id);
+  async updateAct(id: string, dto: UpdateActDto, userId?: string) {
+    const existing = await this.ensureAct(id);
+    this.assertEditable(existing);
     const orgaoFields = await this.resolveOrgaoFields(dto);
     const dataAto =
       dto.dataAto !== undefined ? (dto.dataAto ? new Date(dto.dataAto) : null) : undefined;
@@ -596,6 +727,15 @@ export class NormativeActsService {
       },
       include: { units: { orderBy: { ordem: 'asc' } }, orgao: true },
     });
+
+    await recordInternalHistory(this.prisma, {
+      actId: id,
+      userId,
+      acao: 'editar_metadados',
+      resumo: 'Alterou metadados do ato',
+      withSnapshot: true,
+    });
+
     return {
       ...act,
       orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
@@ -606,22 +746,32 @@ export class NormativeActsService {
     };
   }
 
-  async saveUnits(actId: string, dto: SaveUnitsDto) {
+  async saveUnits(actId: string, dto: SaveUnitsDto, userId?: string) {
     const act = await this.ensureAct(actId);
-    if (act.statusPublicacao === PublicationStatus.publicado) {
-      throw new BadRequestException('Ato publicado — crie uma nova revisão em vez de editar diretamente');
-    }
+    this.assertEditable(act);
 
     const sorted = [...dto.units].sort((a, b) => a.ordem - b.ordem);
+    const ementaCount = sorted.filter((u) => u.tipoUnidade === UnitType.ementa).length;
+    if (ementaCount > 1) {
+      throw new BadRequestException('Só é permitida uma Ementa por ato/versão');
+    }
     const existingUnits = await this.prisma.normativeUnit.findMany({ where: { actId } });
     const existingById = new Map(existingUnits.map((u) => [u.id, u]));
 
     await this.prisma.$transaction(async (tx) => {
       for (const input of sorted) {
+        const texto = sanitizeUnitHtml(input.texto);
+        const formatacao =
+          input.formatacao === null
+            ? Prisma.JsonNull
+            : input.formatacao
+              ? (parseFormatacao(input.formatacao) as unknown as Prisma.InputJsonValue)
+              : undefined;
+
         if (input.id) {
           const prev = existingById.get(input.id);
           if (!prev) continue;
-          if (prev.texto !== input.texto) {
+          if (prev.texto !== texto) {
             await tx.normativeVersion.updateMany({
               where: { unitId: input.id, validoAte: null },
               data: { validoAte: new Date() },
@@ -629,7 +779,7 @@ export class NormativeActsService {
             await tx.normativeVersion.create({
               data: {
                 unitId: input.id,
-                texto: input.texto,
+                texto,
                 validoDe: new Date(),
                 origemActId: actId,
               },
@@ -638,11 +788,12 @@ export class NormativeActsService {
           await tx.normativeUnit.update({
             where: { id: input.id },
             data: {
-              texto: input.texto,
+              texto,
               ordem: input.ordem,
               identificacao: input.identificacao,
               tipoUnidade: input.tipoUnidade,
               parentUnitId: input.parentUnitId ?? null,
+              ...(formatacao !== undefined && { formatacao }),
             },
           });
         } else {
@@ -651,30 +802,50 @@ export class NormativeActsService {
               actId,
               tipoUnidade: input.tipoUnidade,
               identificacao: input.identificacao,
-              texto: input.texto,
+              texto,
               ordem: input.ordem,
               parentUnitId: input.parentUnitId ?? null,
               status: UnitStatus.vigente,
               origemActId: actId,
+              ...(formatacao !== undefined &&
+                formatacao !== Prisma.JsonNull && { formatacao }),
             },
           });
           await tx.normativeVersion.create({
             data: {
               unitId: created.id,
-              texto: input.texto,
+              texto,
               validoDe: new Date(),
               origemActId: actId,
             },
           });
         }
       }
+
+      const ementaUnit = sorted.find((u) => u.tipoUnidade === UnitType.ementa);
+      if (ementaUnit) {
+        const plain = sanitizeUnitHtml(ementaUnit.texto).replace(/<[^>]+>/g, '').trim();
+        await tx.normativeAct.update({
+          where: { id: actId },
+          data: { ementa: plain || act.ementa },
+        });
+      }
+    });
+
+    await recordInternalHistory(this.prisma, {
+      actId,
+      userId,
+      acao: 'salvar_unidades',
+      resumo: 'Salvou texto estruturado / ordenação',
+      withSnapshot: true,
     });
 
     return this.getAdminById(actId);
   }
 
-  async addUnit(actId: string, dto: AddUnitDto) {
+  async addUnit(actId: string, dto: AddUnitDto, userId?: string) {
     const act = await this.ensureAct(actId);
+    this.assertEditable(act);
     const existing = [...act.units].sort((a, b) => a.ordem - b.ordem);
 
     if (dto.parentUnitId) {
@@ -682,7 +853,23 @@ export class NormativeActsService {
       if (!parent) throw new BadRequestException('Dispositivo pai não encontrado');
     }
 
-    const insertOrdem = this.nextOrdemAfterParent(existing, dto.parentUnitId ?? null);
+    if (dto.afterUnitId) {
+      const after = existing.find((u) => u.id === dto.afterUnitId);
+      if (!after) throw new BadRequestException('Elemento de referência não encontrado');
+    }
+
+    if (
+      dto.tipoUnidade === UnitType.ementa &&
+      existing.some((u) => u.tipoUnidade === UnitType.ementa)
+    ) {
+      throw new BadRequestException(
+        'Este ato já possui Ementa. Edite a existente em vez de incluir outra.',
+      );
+    }
+
+    const insertOrdem = dto.afterUnitId
+      ? this.nextOrdemAfterUnit(existing, dto.afterUnitId)
+      : this.nextOrdemAfterParent(existing, dto.parentUnitId ?? null);
 
     await this.prisma.$transaction(async (tx) => {
       const toShift = await tx.normativeUnit.findMany({
@@ -696,6 +883,9 @@ export class NormativeActsService {
         });
       }
 
+      const texto = sanitizeUnitHtml(dto.texto ?? '');
+      const formatacao = dto.formatacao ? parseFormatacao(dto.formatacao) : null;
+
       const unit = await tx.normativeUnit.create({
         data: {
           actId,
@@ -703,56 +893,214 @@ export class NormativeActsService {
           identificacao:
             dto.identificacao ??
             defaultIdentificacao(dto.tipoUnidade, existing, dto.parentUnitId ?? null),
-          texto: dto.texto ?? '',
+          texto,
           ordem: insertOrdem,
           parentUnitId: dto.parentUnitId ?? null,
           status: UnitStatus.vigente,
           origemActId: actId,
+          ...(formatacao ? { formatacao: formatacao as unknown as Prisma.InputJsonValue } : {}),
         },
       });
 
       await tx.normativeVersion.create({
         data: {
           unitId: unit.id,
-          texto: unit.texto,
+          texto,
           validoDe: act.dataAto ?? new Date(),
           origemActId: actId,
         },
       });
     });
 
+    await recordInternalHistory(this.prisma, {
+      actId,
+      userId,
+      acao: 'incluir_elemento',
+      resumo: `Incluiu ${dto.tipoUnidade}${dto.identificacao ? ` (${dto.identificacao})` : ''}`,
+      withSnapshot: true,
+    });
+
     return this.getAdminById(actId);
   }
 
-  async submitForReview(id: string) {
+  async submitForReview(id: string, userId?: string) {
     const act = await this.ensureAct(id);
-    if (act.statusPublicacao === PublicationStatus.publicado) {
-      throw new BadRequestException('Ato já publicado');
+    if (act.statusPublicacao === PublicationStatus.publicado && !act.editionOpen) {
+      throw new BadRequestException('Ato publicado — crie uma nova versão para editar');
     }
     if (act.units.length === 0) {
       throw new BadRequestException('Adicione ao menos um dispositivo antes de enviar');
     }
 
-    await this.prisma.normativeAct.update({
-      where: { id },
-      data: { statusPublicacao: PublicationStatus.em_revisao },
+    // Versão de trabalho em ato já publicado permanece publicada; só rascunhos vão para em_revisao
+    if (!act.editionOpen) {
+      await this.prisma.normativeAct.update({
+        where: { id },
+        data: { statusPublicacao: PublicationStatus.em_revisao },
+      });
+    }
+
+    await recordInternalHistory(this.prisma, {
+      actId: id,
+      userId,
+      acao: 'enviar_revisao',
+      resumo: act.editionOpen
+        ? 'Marcou versão de trabalho como pronta para publicação'
+        : 'Enviou para revisão',
+      withSnapshot: true,
     });
+
     return this.getAdminById(id);
   }
 
-  async publish(id: string) {
+  async publish(id: string, userId?: string) {
     const act = await this.ensureAct(id);
     if (act.units.length === 0) {
       throw new BadRequestException('Ato sem dispositivos não pode ser publicado');
     }
 
+    const isAdminCorrection = act.editionOpen;
+    const last = await this.prisma.actPublicRevision.findFirst({
+      where: { actId: id },
+      orderBy: { revisionNumber: 'desc' },
+    });
+    const revisionNumber = (last?.revisionNumber ?? 0) + 1;
+    const snapshot = await buildActSnapshot(this.prisma, id);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.actPublicRevision.updateMany({
+        where: { actId: id, isCurrent: true },
+        data: { isCurrent: false },
+      });
+      await tx.actPublicRevision.create({
+        data: {
+          actId: id,
+          revisionNumber,
+          snapshot: snapshot as unknown as Prisma.InputJsonValue,
+          isCurrent: true,
+          publishedById: userId ?? null,
+        },
+      });
+      await tx.normativeAct.update({
+        where: { id },
+        data: {
+          statusPublicacao: PublicationStatus.publicado,
+          editionOpen: false,
+        },
+      });
+    });
+
+    // Correção administrativa não reaplica consolidação nem gera histórico legislativo público
+    if (!isAdminCorrection) {
+      await this.consolidation.applyPendingEffectsForAct(id);
+    }
+    await refreshSearchVector(this.prisma, id);
+
+    await recordInternalHistory(this.prisma, {
+      actId: id,
+      userId,
+      acao: 'publicacao',
+      resumo: isAdminCorrection
+        ? `Publicou correção administrativa (versão ${revisionNumber})`
+        : `Publicou versão ${revisionNumber}`,
+      revisionNumber,
+      withSnapshot: true,
+    });
+
+    return this.getAdminById(id);
+  }
+
+  async createEdition(id: string, userId?: string) {
+    const act = await this.ensureAct(id);
+    if (act.statusPublicacao !== PublicationStatus.publicado) {
+      throw new BadRequestException('Nova versão só se aplica a atos já publicados');
+    }
+    if (act.editionOpen) {
+      return this.getAdminById(id);
+    }
+
+    // Garante snapshot público atual antes de liberar edição
+    const currentPublic = await this.prisma.actPublicRevision.findFirst({
+      where: { actId: id, isCurrent: true },
+    });
+    if (!currentPublic) {
+      const snapshot = await buildActSnapshot(this.prisma, id);
+      await this.prisma.actPublicRevision.create({
+        data: {
+          actId: id,
+          revisionNumber: 1,
+          snapshot: snapshot as unknown as Prisma.InputJsonValue,
+          isCurrent: true,
+          publishedById: userId ?? null,
+        },
+      });
+    }
+
     await this.prisma.normativeAct.update({
       where: { id },
-      data: { statusPublicacao: PublicationStatus.publicado },
+      data: { editionOpen: true },
     });
-    await this.consolidation.applyPendingEffectsForAct(id);
-    await refreshSearchVector(this.prisma, id);
+
+    await recordInternalHistory(this.prisma, {
+      actId: id,
+      userId,
+      acao: 'criar_versao',
+      resumo: 'Abriu nova versão de trabalho a partir da versão publicada',
+      withSnapshot: true,
+    });
+
     return this.getAdminById(id);
+  }
+
+  async listInternalHistory(actId: string) {
+    await this.ensureAct(actId);
+    return this.prisma.actInternalHistory.findMany({
+      where: { actId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        actId: true,
+        userId: true,
+        acao: true,
+        resumo: true,
+        revisionNumber: true,
+        createdAt: true,
+        user: { select: { id: true, nome: true, email: true } },
+      },
+    });
+  }
+
+  async getInternalHistoryEntry(actId: string, entryId: string) {
+    await this.ensureAct(actId);
+    const entry = await this.prisma.actInternalHistory.findFirst({
+      where: { id: entryId, actId },
+      include: { user: { select: { id: true, nome: true, email: true } } },
+    });
+    if (!entry) throw new NotFoundException('Registro de histórico não encontrado');
+    return entry;
+  }
+
+  async compareInternalHistory(actId: string, leftId: string, rightId: string) {
+    const [left, right] = await Promise.all([
+      this.getInternalHistoryEntry(actId, leftId),
+      this.getInternalHistoryEntry(actId, rightId),
+    ]);
+    if (!left.snapshot || !right.snapshot) {
+      throw new BadRequestException('Um dos registros não possui fotografia completa');
+    }
+    return {
+      left: { id: left.id, acao: left.acao, createdAt: left.createdAt, resumo: left.resumo },
+      right: { id: right.id, acao: right.acao, createdAt: right.createdAt, resumo: right.resumo },
+      diff: diffSnapshots(left.snapshot as unknown as ActSnapshot, right.snapshot as unknown as ActSnapshot),
+    };
+  }
+
+  private assertEditable(act: { statusPublicacao: PublicationStatus; editionOpen: boolean }) {
+    if (act.statusPublicacao === PublicationStatus.publicado && !act.editionOpen) {
+      throw new BadRequestException(
+        'Ato publicado — use “Criar nova versão” para editar sem alterar a consulta pública',
+      );
+    }
   }
 
   async resolveSlug(slugPath: string) {
@@ -785,6 +1133,19 @@ export class NormativeActsService {
     return lastIndex + 1;
   }
 
+  private nextOrdemAfterUnit(
+    units: { id: string; ordem: number; parentUnitId?: string | null }[],
+    afterUnitId: string,
+  ): number {
+    const idx = units.findIndex((u) => u.id === afterUnitId);
+    if (idx < 0) return units.length;
+    const subtreeIds = this.collectSubtreeIds(afterUnitId, units);
+    const lastIndex = Math.max(
+      ...units.map((u, i) => (subtreeIds.has(u.id) ? i : -1)).filter((i) => i >= 0),
+    );
+    return lastIndex + 1;
+  }
+
   private collectSubtreeIds(
     rootId: string,
     units: { id: string; parentUnitId?: string | null }[],
@@ -812,11 +1173,14 @@ export class NormativeActsService {
     return act;
   }
 
-  async restoreUnitVersion(actId: string, unitId: string, versionId: string) {
+  async restoreUnitVersion(
+    actId: string,
+    unitId: string,
+    versionId: string,
+    userId?: string,
+  ) {
     const act = await this.ensureAct(actId);
-    if (act.statusPublicacao === PublicationStatus.publicado) {
-      throw new BadRequestException('Ato publicado — não é possível restaurar versões');
-    }
+    this.assertEditable(act);
 
     const unit = act.units.find((u) => u.id === unitId);
     if (!unit) throw new NotFoundException('Dispositivo não encontrado');
@@ -843,6 +1207,14 @@ export class NormativeActsService {
           origemActId: actId,
         },
       });
+    });
+
+    await recordInternalHistory(this.prisma, {
+      actId,
+      userId,
+      acao: 'restaurar_texto',
+      resumo: `Restaurou texto de ${unit.identificacao ?? unit.tipoUnidade}`,
+      withSnapshot: true,
     });
 
     return this.getAdminById(actId);

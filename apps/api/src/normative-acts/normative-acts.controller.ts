@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { ActSituacao, ActType } from '@prisma/client';
 import { Public, RequirePermissions } from '../auth/auth.constants';
+import type { AuthUser } from '../auth/auth.constants';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import {
@@ -100,6 +102,28 @@ export class AdminActsController {
     return this.acts.getAdminKpis();
   }
 
+  @Get(':id/history')
+  @RequirePermissions('acts:history')
+  listHistory(@Param('id') id: string) {
+    return this.acts.listInternalHistory(id);
+  }
+
+  @Get(':id/history/:entryId')
+  @RequirePermissions('acts:history')
+  historyEntry(@Param('id') id: string, @Param('entryId') entryId: string) {
+    return this.acts.getInternalHistoryEntry(id, entryId);
+  }
+
+  @Get(':id/history-compare')
+  @RequirePermissions('acts:history')
+  compareHistory(
+    @Param('id') id: string,
+    @Query('left') left: string,
+    @Query('right') right: string,
+  ) {
+    return this.acts.compareInternalHistory(id, left, right);
+  }
+
   @Get(':id')
   detail(@Param('id') id: string) {
     return this.acts.getAdminById(id);
@@ -107,38 +131,48 @@ export class AdminActsController {
 
   @Patch(':id')
   @RequirePermissions('acts:write')
-  update(@Param('id') id: string, @Body() dto: UpdateActDto) {
-    return this.acts.updateAct(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateActDto, @CurrentUser() user: AuthUser) {
+    return this.acts.updateAct(id, dto, user.id);
   }
 
   @Put(':id/units')
   @RequirePermissions('acts:write')
-  saveUnits(@Param('id') id: string, @Body() dto: SaveUnitsDto) {
-    return this.acts.saveUnits(id, dto);
+  saveUnits(@Param('id') id: string, @Body() dto: SaveUnitsDto, @CurrentUser() user: AuthUser) {
+    return this.acts.saveUnits(id, dto, user.id);
   }
 
   @Put(':id/legislative-effects')
   @RequirePermissions('acts:write')
-  saveLegislativeEffects(@Param('id') id: string, @Body() dto: SaveLegislativeEffectsDto) {
-    return this.acts.saveLegislativeEffects(id, dto);
+  saveLegislativeEffects(
+    @Param('id') id: string,
+    @Body() dto: SaveLegislativeEffectsDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.acts.saveLegislativeEffects(id, dto, user.id);
   }
 
   @Post(':id/units')
   @RequirePermissions('acts:write')
-  addUnit(@Param('id') id: string, @Body() dto: AddUnitDto) {
-    return this.acts.addUnit(id, dto);
+  addUnit(@Param('id') id: string, @Body() dto: AddUnitDto, @CurrentUser() user: AuthUser) {
+    return this.acts.addUnit(id, dto, user.id);
   }
 
   @Post(':id/submit-review')
   @RequirePermissions('acts:write')
-  submitReview(@Param('id') id: string) {
-    return this.acts.submitForReview(id);
+  submitReview(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.acts.submitForReview(id, user.id);
+  }
+
+  @Post(':id/create-edition')
+  @RequirePermissions('acts:version')
+  createEdition(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.acts.createEdition(id, user.id);
   }
 
   @Post(':id/publish')
   @RequirePermissions('acts:publish')
-  publish(@Param('id') id: string) {
-    return this.acts.publish(id);
+  publish(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.acts.publish(id, user.id);
   }
 
   @Post(':id/units/:unitId/restore/:versionId')
@@ -147,7 +181,8 @@ export class AdminActsController {
     @Param('id') id: string,
     @Param('unitId') unitId: string,
     @Param('versionId') versionId: string,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.acts.restoreUnitVersion(id, unitId, versionId);
+    return this.acts.restoreUnitVersion(id, unitId, versionId, user.id);
   }
 }

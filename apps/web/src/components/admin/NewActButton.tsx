@@ -21,7 +21,6 @@ export function NewActButton() {
     numero: '',
     ano: String(new Date().getFullYear()),
     dataAto: '',
-    ementa: '',
     orgaoOrigemId: '',
   });
 
@@ -43,7 +42,7 @@ export function NewActButton() {
         tipo: form.tipo,
         numero: Number(form.numero),
         ano,
-        ementa: form.ementa,
+        ementa: 'Ementa pendente',
         dataAto: form.dataAto || undefined,
         orgaoOrigemId: form.orgaoOrigemId || undefined,
       });
@@ -142,16 +141,9 @@ export function NewActButton() {
               {preview}
             </p>
           )}
-          <div>
-            <label className="mb-1 block text-[12px] text-ink-3">Ementa</label>
-            <textarea
-              required
-              minLength={3}
-              value={form.ementa}
-              onChange={(e) => setForm({ ...form, ementa: e.target.value })}
-              className="min-h-[80px] w-full rounded-[10px] border border-line px-3.5 py-2 text-[13.5px] focus-ring"
-            />
-          </div>
+          <p className="rounded-[8px] border border-dashed border-line px-3 py-2 text-[12px] text-ink-3">
+            A ementa será cadastrada no Editor de Texto Estruturado (grupo Texto → Ementa).
+          </p>
           <div>
             <label className="mb-1 block text-[12px] text-ink-3">Órgão de origem</label>
             <Select

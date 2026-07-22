@@ -38,7 +38,8 @@ const STRUCTURAL_PARENTS: UnitType[] = [
   UnitType.anexo,
 ];
 
-const VALID_PARENTS: Partial<Record<UnitType, UnitType[]>> = {
+/** Hierarquia usual (sugestão). Não bloqueia vínculos atípicos. */
+export const RECOMMENDED_PARENTS: Partial<Record<UnitType, UnitType[]>> = {
   [UnitType.parte]: [],
   [UnitType.livro]: [UnitType.parte],
   [UnitType.titulo]: [UnitType.parte, UnitType.livro],
@@ -56,13 +57,30 @@ const VALID_PARENTS: Partial<Record<UnitType, UnitType[]>> = {
   [UnitType.item]: [UnitType.alinea, UnitType.inciso],
 };
 
-export function isValidParent(childType: UnitType, parentType: UnitType): boolean {
-  const allowed = VALID_PARENTS[childType];
+export function isRecommendedParent(childType: UnitType, parentType: UnitType): boolean {
+  if (
+    childType === UnitType.texto_simples ||
+    childType === UnitType.preambulo ||
+    childType === UnitType.ementa ||
+    childType === UnitType.considerando
+  ) {
+    return false;
+  }
+  const allowed = RECOMMENDED_PARENTS[childType];
   if (!allowed) return true;
   if (allowed.length === 0) return false;
   return allowed.includes(parentType);
 }
 
+/** @deprecated Prefer isRecommendedParent — não bloqueia vínculos. */
+export function isValidParent(childType: UnitType, parentType: UnitType): boolean {
+  return isRecommendedParent(childType, parentType);
+}
+
+/**
+ * Valida apenas integridade estrutural (órfãos, ciclos, ordem).
+ * Vínculos fora do padrão usual NÃO invalidam.
+ */
 export function validateUnitsHierarchy(
   units: { id: string; ordem: number; tipoUnidade: UnitType; parentUnitId?: string | null }[],
 ): boolean {
@@ -77,16 +95,21 @@ export function validateUnitsHierarchy(
 
   for (const unit of sorted) {
     if (!unit.parentUnitId) continue;
+    if (unit.parentUnitId === unit.id) return false;
     const parent = byId.get(unit.parentUnitId);
     if (!parent) return false;
-    if (!isValidParent(unit.tipoUnidade, parent.tipoUnidade)) return false;
     if (parent.ordem >= unit.ordem) return false;
-  }
 
+    let cur: string | null | undefined = parent.parentUnitId;
+    const seen = new Set<string>([unit.id, parent.id]);
+    while (cur) {
+      if (seen.has(cur)) return false;
+      seen.add(cur);
+      cur = byId.get(cur)?.parentUnitId;
+    }
+  }
   return true;
 }
-
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
 export function defaultIdentificacao(
   tipo: UnitType,
@@ -103,10 +126,15 @@ export function defaultIdentificacao(
       return 'Parágrafo único';
     case UnitType.paragrafo:
       return `§ ${siblings(UnitType.paragrafo).length + 1}º`;
-    case UnitType.inciso:
-      return ROMAN[siblings(UnitType.inciso).length] ?? String(siblings(UnitType.inciso).length + 1);
-    case UnitType.alinea:
-      return `${String.fromCharCode(97 + siblings(UnitType.alinea).length)})`;
+    case UnitType.inciso: {
+      const n = siblings(UnitType.inciso).length + 1;
+      const romans = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+      return romans[n - 1] ?? String(n);
+    }
+    case UnitType.alinea: {
+      const n = siblings(UnitType.alinea).length;
+      return `${String.fromCharCode(97 + n)})`;
+    }
     case UnitType.item:
       return `${siblings(UnitType.item).length + 1}.`;
     case UnitType.parte:
@@ -128,9 +156,12 @@ export function defaultIdentificacao(
     case UnitType.anexo:
       return `ANEXO ${units.filter((u) => u.tipoUnidade === UnitType.anexo).length + 1}`;
     case UnitType.considerando:
-      return 'Considerando';
     case UnitType.preambulo:
       return 'Preâmbulo';
+    case UnitType.ementa:
+      return 'Ementa';
+    case UnitType.texto_simples:
+      return undefined;
     default:
       return undefined;
   }

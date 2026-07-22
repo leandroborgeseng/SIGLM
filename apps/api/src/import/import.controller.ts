@@ -84,6 +84,24 @@ export class ImportController {
     return this.imports.approveOcr(id, user.id);
   }
 
+  @Patch(':id/structure')
+  updateStructure(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      blocos: {
+        tag: string;
+        tipo: string;
+        texto: string;
+        confianca: number;
+        ordem: number;
+        parentOrdem?: number | null;
+      }[];
+    },
+  ) {
+    return this.imports.updateDetectedStructure(id, body.blocos);
+  }
+
   @Post(':id/confirm')
   confirm(
     @Param('id') id: string,
@@ -97,6 +115,14 @@ export class ImportController {
       orgaoOrigem?: string;
       orgaoOrigemId?: string;
       efeitosAceitos?: string[];
+      blocos?: {
+        tag: string;
+        tipo: string;
+        texto: string;
+        confianca: number;
+        ordem: number;
+        parentOrdem?: number | null;
+      }[];
     },
   ) {
     return this.imports.confirmDraft(id, body);

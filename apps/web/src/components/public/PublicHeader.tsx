@@ -7,7 +7,7 @@ export function PublicHeader() {
     <header className="no-print sticky top-0 z-40 border-b border-line bg-surface/95 backdrop-blur">
       <div className="mx-auto flex h-[60px] max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
         <Link href="/legislacao" className="flex min-w-0 items-center gap-3">
-          <FrancaMark size={37} priority />
+          <FrancaMark size={40} priority />
           <div className="min-w-0 leading-tight">
             <div className="truncate text-[16px] font-bold tracking-tight text-ink">Portal de Legislação</div>
             <div className="truncate text-[11.5px] font-medium text-ink-3">Prefeitura Municipal de Franca/SP</div>

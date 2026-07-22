@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Suspense } from 'react';
-import { SkipLink } from '@/components/a11y/SkipLink';
 import { ActCard } from '@/components/public/ActCard';
 import { FilterSidebar } from '@/components/public/FilterSidebar';
 import { MobileFilterDrawer } from '@/components/public/MobileFilterDrawer';
@@ -125,59 +124,53 @@ export default async function LegislacaoPage({
 
   if (apiError || !counts) {
     return (
-      <>
-        <SkipLink />
-        <div className="min-h-dvh bg-canvas">
-          <PublicHeader />
-          <main id="main-content" className="mx-auto max-w-2xl px-4 py-16 text-center">
-            <p className="text-page-title mb-2">Portal temporariamente indisponível</p>
-            <p className="text-[14px] text-ink-3 mb-4">
-              Não foi possível carregar os dados da API. Verifique se o serviço da API está no ar.
+      <div className="min-h-dvh bg-canvas">
+        <PublicHeader />
+        <main id="main-content" className="mx-auto max-w-2xl px-4 py-16 text-center">
+          <p className="text-page-title mb-2">Portal temporariamente indisponível</p>
+          <p className="text-[14px] text-ink-3 mb-4">
+            Não foi possível carregar os dados da API. Verifique se o serviço da API está no ar.
+          </p>
+          {apiError && (
+            <p className="rounded-[10px] border border-line bg-surface px-4 py-3 text-left text-[13px] text-ink-3">
+              {apiError}
             </p>
-            {apiError && (
-              <p className="rounded-[10px] border border-line bg-surface px-4 py-3 text-left text-[13px] text-ink-3 font-mono">
-                {apiError}
-              </p>
-            )}
-          </main>
-        </div>
-      </>
+          )}
+        </main>
+      </div>
     );
   }
 
   return (
-    <>
-      <SkipLink />
-      <div className="min-h-dvh bg-canvas pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
-        <PublicHeader />
-        <Suspense>
-          <SearchHero />
-        </Suspense>
-        <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-          <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
-            <div className="hidden lg:block">
-              <Suspense>
-                <FilterSidebar counts={counts} />
-              </Suspense>
-            </div>
-            <div>
-              <Suspense>
-                <MobileFilterDrawer counts={counts} />
-              </Suspense>
-              <Suspense
-                fallback={
-                  <div className="rounded-[14px] border border-line bg-surface p-8 text-ink-3">
-                    Carregando resultados...
-                  </div>
-                }
-              >
-                <Results searchParams={searchParams} />
-              </Suspense>
-            </div>
+    <div className="min-h-dvh bg-canvas pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <PublicHeader />
+      <Suspense>
+        <SearchHero />
+      </Suspense>
+      <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
+          <div className="hidden lg:block">
+            <Suspense>
+              <FilterSidebar counts={counts} />
+            </Suspense>
           </div>
-        </main>
-        <PublicBottomNav />
-      </div>
-    </>
+          <div>
+            <Suspense>
+              <MobileFilterDrawer counts={counts} />
+            </Suspense>
+            <Suspense
+              fallback={
+                <div className="rounded-[14px] border border-line bg-surface p-8 text-ink-3">
+                  Carregando resultados...
+                </div>
+              }
+            >
+              <Results searchParams={searchParams} />
+            </Suspense>
+          </div>
+        </div>
+      </main>
+      <PublicBottomNav />
+    </div>
   );
 }

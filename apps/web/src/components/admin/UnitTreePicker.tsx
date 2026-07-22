@@ -48,7 +48,7 @@ function TreeNode({
           className="min-w-0 flex-1 truncate text-left text-[12px]"
           onClick={() => onSelect(node.unit.id)}
         >
-          <span className="font-mono font-medium">{unitTreeLabel(node.unit)}</span>
+          <span className="font-medium">{unitTreeLabel(node.unit)}</span>
           <span className="ml-1 text-[10px] text-ink-4">
             ({UNIT_TYPE_LABELS[node.unit.tipoUnidade as UnitType]})
           </span>

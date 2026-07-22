@@ -2,15 +2,43 @@
 
 import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { FrancaMark } from '@/components/brand/FrancaMark';
+import { getApiBaseUrl } from '@/lib/api-url';
 import { cn, formatDate, formatFormalTitle } from '@/lib/format';
+import { formatacaoClassNames, sanitizeUnitHtml } from '@/lib/rich-text';
 import { unitIndentClass, UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
-import type { ActDetail, NormativeUnit, UnitType } from '@/lib/types';
+import type { ActAttachment, ActDetail, NormativeUnit, UnitType } from '@/lib/types';
 
 function noteClass(nota: string | null): string {
   if (!nota) return 'text-ink-3';
   if (nota.toLowerCase().includes('revogado')) return 'text-danger';
   if (nota.toLowerCase().includes('incluído')) return 'text-ok';
   return 'text-warn';
+}
+
+function SupplementLink({ item }: { item: ActAttachment }) {
+  const API_URL = getApiBaseUrl();
+  const label = item.titulo || item.nome;
+  let href: string | null = null;
+  let external = false;
+  if (item.href) {
+    href = item.href;
+    external = /^https?:\/\//i.test(item.href);
+  } else if (item.downloadUrl) {
+    href = item.downloadUrl.startsWith('http')
+      ? item.downloadUrl
+      : `${API_URL}${item.downloadUrl}`;
+  }
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      className="text-[14.5px] text-[#0066cc] underline hover:opacity-90"
+      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+    >
+      {label}
+    </a>
+  );
 }
 
 const STRUCTURAL_TYPES: UnitType[] = [
@@ -25,21 +53,48 @@ const STRUCTURAL_TYPES: UnitType[] = [
   'anexo',
 ];
 
+function RichHtml({ html, className }: { html: string; className?: string }) {
+  const safe = sanitizeUnitHtml(html);
+  return (
+    <span
+      className={cn('[&_a]:text-[#0066cc] [&_a]:underline hover:[&_a]:opacity-90', className)}
+      dangerouslySetInnerHTML={{ __html: safe }}
+    />
+  );
+}
+
 function sortUnitsForDisplay(units: NormativeUnit[]): NormativeUnit[] {
+  /** Ordem padrão: Ementa → Preâmbulo → demais (ordem estruturada). */
   const weight = (tipo: UnitType) => {
-    if (tipo === 'ementa') return 99;
-    if (tipo === 'considerando') return 0;
-    if (tipo === 'preambulo') return 1;
+    if (tipo === 'ementa') return 0;
+    if (tipo === 'preambulo' || tipo === 'considerando') return 1;
     return 2;
   };
-  return [...units]
-    .filter((u) => u.tipoUnidade !== 'ementa')
-    .sort((a, b) => {
-      const wa = weight(a.tipoUnidade);
-      const wb = weight(b.tipoUnidade);
-      if (wa !== wb) return wa - wb;
-      return a.ordem - b.ordem;
-    });
+  return [...units].sort((a, b) => {
+    const wa = weight(a.tipoUnidade);
+    const wb = weight(b.tipoUnidade);
+    if (wa !== wb) return wa - wb;
+    return a.ordem - b.ordem;
+  });
+}
+
+function MultiParagraph({ html, className }: { html: string; className?: string }) {
+  const parts = html
+    .split(/\n{2,}|\r\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) {
+    return <RichHtml html={html} className={className} />;
+  }
+  return (
+    <>
+      {parts.map((part, i) => (
+        <p key={i} className={cn(i > 0 && 'mt-3', className)}>
+          <RichHtml html={part.replace(/\n/g, '<br/>')} />
+        </p>
+      ))}
+    </>
+  );
 }
 
 function UnitBlock({
@@ -50,8 +105,9 @@ function UnitBlock({
   mode: 'consolidado' | 'original';
 }) {
   const isStructural = STRUCTURAL_TYPES.includes(unit.tipoUnidade);
-  const isPreamble = unit.tipoUnidade === 'preambulo';
-  const isConsiderando = unit.tipoUnidade === 'considerando';
+  const isPreamble = unit.tipoUnidade === 'preambulo' || unit.tipoUnidade === 'considerando';
+  const isEmenta = unit.tipoUnidade === 'ementa';
+  const isSimple = unit.tipoUnidade === 'texto_simples';
   const isRevoked = unit.status === 'revogada';
   const isIncluded = unit.status === 'incluida';
   const isAltered = unit.status === 'alterada';
@@ -68,10 +124,12 @@ function UnitBlock({
   const anchorId =
     unit.identificacao?.replace(/\s+/g, '-').toLowerCase() ?? `unit-${unit.ordem}`;
 
-  if (isConsiderando) {
+  if (isEmenta) {
     return (
-      <article id={anchorId} className="mb-3">
-        <p className="text-[15px] leading-[1.75] text-ink text-justify">{texto}</p>
+      <article id={anchorId} className="mb-5 ml-auto max-w-[min(100%,36rem)] text-right">
+        <p className="text-[14.5px] leading-relaxed text-ink">
+          <RichHtml html={texto} />
+        </p>
         {mode === 'consolidado' && unit.nota && (
           <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
         )}
@@ -79,10 +137,28 @@ function UnitBlock({
     );
   }
 
+  if (isSimple) {
+    return (
+      <article id={anchorId} className={cn('mb-4', indent)}>
+        <p
+          className={cn(
+            'text-[15px] leading-[1.75] text-ink',
+            formatacaoClassNames(unit.formatacao),
+          )}
+        >
+          <RichHtml html={texto} />
+        </p>
+      </article>
+    );
+  }
+
   if (isPreamble) {
     return (
-      <article id={anchorId} className="mb-6 text-center italic text-[15px] leading-[1.75] text-ink-2">
-        {texto}
+      <article id={anchorId} className="mb-6 text-[15px] leading-[1.75] text-ink text-justify">
+        <MultiParagraph html={texto} />
+        {mode === 'consolidado' && unit.nota && (
+          <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
+        )}
       </article>
     );
   }
@@ -92,7 +168,7 @@ function UnitBlock({
       <article id={anchorId} className={cn('mb-5', indent)}>
         <h3 className="text-center text-[15px] font-semibold uppercase tracking-wide text-ink">
           {unit.identificacao && <span className="block">{unit.identificacao}</span>}
-          {texto}
+          <RichHtml html={texto} />
         </h3>
         {mode === 'consolidado' && unit.nota && (
           <p className={cn('mt-1 text-center text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
@@ -116,7 +192,7 @@ function UnitBlock({
       id={anchorId}
       className={cn('mb-4', indent, isRevoked && mode === 'consolidado' && 'opacity-80')}
     >
-      <p className="text-[15px] leading-[1.75] text-ink text-justify">
+      <p className="text-justify text-[15px] leading-[1.75] text-ink">
         {showLabel && label && (
           <strong
             className={cn(
@@ -129,7 +205,7 @@ function UnitBlock({
         )}
         <span className={cn(isRevoked && mode === 'consolidado' && 'text-ink-4 line-through')}>
           {showLabel && label ? ' ' : ''}
-          {texto}
+          <RichHtml html={texto} />
         </span>
       </p>
       {mode === 'consolidado' && unit.nota && (
@@ -144,7 +220,9 @@ export function ActContent({ act }: { act: ActDetail }) {
   const [tocOpen, setTocOpen] = useState(false);
 
   const displayUnits = useMemo(() => sortUnitsForDisplay(act.units), [act.units]);
-  const articles = displayUnits.filter((u) => u.tipoUnidade === 'artigo' && u.identificacao);
+  const ementaUnit = displayUnits.find((u) => u.tipoUnidade === 'ementa');
+  const bodyUnits = displayUnits.filter((u) => u.tipoUnidade !== 'ementa');
+  const articles = bodyUnits.filter((u) => u.tipoUnidade === 'artigo' && u.identificacao);
   const tituloFormal =
     act.tituloFormal ?? formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
 
@@ -152,12 +230,7 @@ export function ActContent({ act }: { act: ActDetail }) {
     <div className="bg-white text-ink">
       <header className="mb-8">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/brand/franca-mark.png"
-            alt="Brasão de Franca"
-            className="h-14 w-14 object-contain"
-          />
+          <FrancaMark size={56} priority />
           <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-3">
             Prefeitura Municipal de Franca/SP
           </p>
@@ -167,9 +240,13 @@ export function ActContent({ act }: { act: ActDetail }) {
           {tituloFormal}
         </h1>
 
-        <p className="ml-auto mb-5 max-w-[min(100%,36rem)] text-right text-[14.5px] leading-relaxed text-ink">
-          {act.ementa}
-        </p>
+        {tab !== 'historico' && ementaUnit ? (
+          <UnitBlock unit={ementaUnit} mode={tab} />
+        ) : tab !== 'historico' && act.ementa ? (
+          <p className="ml-auto mb-5 max-w-[min(100%,36rem)] text-right text-[14.5px] leading-relaxed text-ink">
+            {act.ementa}
+          </p>
+        ) : null}
 
         <p className="no-print text-center text-[12px] text-ink-3">
           {act.codigo}
@@ -186,6 +263,16 @@ export function ActContent({ act }: { act: ActDetail }) {
           <span className="mx-1.5">·</span>
           Pub.: {formatDate(act.dataPublicacao)}
         </p>
+
+        {(act.anexosTopo?.length ?? 0) > 0 && (
+          <ul className="mt-5 space-y-1.5 border-t border-line/50 pt-4">
+            {act.anexosTopo!.map((item) => (
+              <li key={item.id}>
+                <SupplementLink item={item} />
+              </li>
+            ))}
+          </ul>
+        )}
       </header>
 
       {tab !== 'historico' && articles.length > 0 && (
@@ -241,11 +328,33 @@ export function ActContent({ act }: { act: ActDetail }) {
             ))}
           </ol>
         ) : (
-          displayUnits.map((unit) => <UnitBlock key={unit.id} unit={unit} mode={tab} />)
+          bodyUnits.map((unit) => <UnitBlock key={unit.id} unit={unit} mode={tab} />)
         )}
       </div>
 
-      <section className="no-print mt-12 border-t border-line pt-6">
+      <section className="mt-10 space-y-2 border-t border-line pt-6">
+        {(act.anexosFinal?.length ?? 0) > 0 && (
+          <ul className="space-y-1.5">
+            {act.anexosFinal!.map((item) => (
+              <li key={item.id}>
+                <SupplementLink item={item} />
+              </li>
+            ))}
+          </ul>
+        )}
+        {act.arquivoOriginal?.downloadUrl && (
+          <p>
+            <SupplementLink
+              item={{
+                ...act.arquivoOriginal,
+                titulo: 'Acessar arquivo original do ato',
+              }}
+            />
+          </p>
+        )}
+      </section>
+
+      <section className="no-print mt-8 border-t border-line pt-6">
         <p className="mb-3 text-[12px] font-medium uppercase tracking-wide text-ink-3">
           Versões e histórico
         </p>

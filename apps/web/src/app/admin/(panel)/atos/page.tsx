@@ -61,7 +61,7 @@ export default async function AdminAtosPage() {
             <tbody>
               {data.items.map((act) => (
                 <tr key={act.id} className="border-b border-line-2 transition hover:bg-surface-2">
-                  <td className="px-4 py-3 font-mono text-[13px] font-semibold text-brand">
+                  <td className="px-4 py-3 text-[13px] font-semibold text-brand">
                     {act.codigo}
                   </td>
                   <td className="max-w-xs truncate px-4 py-3 text-ink-2">{act.ementa}</td>

@@ -1,4 +1,4 @@
-import type { ActDetail, AdminListResponse, LegislativeEffect } from './types';
+import type { ActAttachment, ActDetail, AdminListResponse, LegislativeEffect } from './types';
 import { AuthError } from './api';
 import { getApiBaseUrl } from './api-url';
 
@@ -143,6 +143,13 @@ export interface UnitPayload {
   texto: string;
   ordem: number;
   parentUnitId?: string | null;
+  formatacao?: {
+    align?: 'left' | 'center' | 'right' | 'justify';
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    letterSpacing?: 'normal' | 'expanded';
+  } | null;
 }
 
 export function createAct(payload: CreateActPayload, token?: string) {
@@ -180,6 +187,8 @@ export function addUnit(
     identificacao?: string;
     texto?: string;
     parentUnitId?: string | null;
+    afterUnitId?: string | null;
+    formatacao?: UnitPayload['formatacao'];
   },
   token?: string,
 ) {
@@ -197,12 +206,145 @@ export function publishAct(id: string, token?: string) {
   return adminFetch<ActDetail>(`/admin/acts/${id}/publish`, { method: 'POST' }, token);
 }
 
+export function createActEdition(id: string, token?: string) {
+  return adminFetch<ActDetail>(`/admin/acts/${id}/create-edition`, { method: 'POST' }, token);
+}
+
+export type ActAttachmentsBundle = {
+  original: ActAttachment | null;
+  topo: ActAttachment[];
+  final: ActAttachment[];
+  historico: ActAttachment[];
+  all: ActAttachment[];
+};
+
+export function listActAttachments(actId: string, token?: string) {
+  return adminFetch<ActAttachmentsBundle>(`/admin/acts/${actId}/attachments`, {}, token);
+}
+
+export async function uploadActOriginal(actId: string, file: File): Promise<ActAttachment> {
+  const API_URL = getApiBaseUrl();
+  const token = readClientToken();
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_URL}/admin/acts/${actId}/attachments/original`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message ?? 'Erro ao enviar arquivo original');
+  }
+  return res.json();
+}
+
+export async function createActSupplement(
+  actId: string,
+  data: {
+    secao: 'topo' | 'final';
+    titulo: string;
+    modo: 'arquivo' | 'hiperlink';
+    href?: string;
+    file?: File | null;
+  },
+): Promise<ActAttachment> {
+  const API_URL = getApiBaseUrl();
+  const token = readClientToken();
+  const form = new FormData();
+  form.append('secao', data.secao);
+  form.append('titulo', data.titulo);
+  form.append('modo', data.modo);
+  if (data.href) form.append('href', data.href);
+  if (data.file) form.append('file', data.file);
+  const res = await fetch(`${API_URL}/admin/acts/${actId}/attachments/supplements`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message ?? 'Erro ao criar item');
+  }
+  return res.json();
+}
+
+export function updateActSupplement(
+  actId: string,
+  attachmentId: string,
+  data: { titulo?: string; href?: string; ordem?: number },
+  token?: string,
+) {
+  return adminFetch<ActAttachment>(
+    `/admin/acts/${actId}/attachments/supplements/${attachmentId}`,
+    { method: 'PATCH', body: JSON.stringify(data) },
+    token,
+  );
+}
+
+export function reorderActSupplements(
+  actId: string,
+  secao: 'topo' | 'final',
+  orderedIds: string[],
+  token?: string,
+) {
+  return adminFetch<ActAttachmentsBundle>(
+    `/admin/acts/${actId}/attachments/supplements/reorder`,
+    { method: 'PUT', body: JSON.stringify({ secao, orderedIds }) },
+    token,
+  );
+}
+
+export function removeActSupplement(actId: string, attachmentId: string, token?: string) {
+  return adminFetch<{ ok: boolean }>(
+    `/admin/acts/${actId}/attachments/supplements/${attachmentId}`,
+    { method: 'DELETE' },
+    token,
+  );
+}
+
 export function restoreUnitVersion(actId: string, unitId: string, versionId: string, token?: string) {
   return adminFetch<ActDetail>(
     `/admin/acts/${actId}/units/${unitId}/restore/${versionId}`,
     { method: 'POST' },
     token,
   );
+}
+
+export interface ActHistoryEntry {
+  id: string;
+  actId: string;
+  userId: string | null;
+  acao: string;
+  resumo: string | null;
+  revisionNumber: number | null;
+  createdAt: string;
+  snapshot?: unknown;
+  user?: { id: string; nome: string; email: string } | null;
+}
+
+export function listActInternalHistory(actId: string, token?: string) {
+  return adminFetch<ActHistoryEntry[]>(`/admin/acts/${actId}/history`, {}, token);
+}
+
+export function getActHistoryEntry(actId: string, entryId: string, token?: string) {
+  return adminFetch<ActHistoryEntry>(`/admin/acts/${actId}/history/${entryId}`, {}, token);
+}
+
+export function compareActHistory(actId: string, leftId: string, rightId: string, token?: string) {
+  return adminFetch<{
+    left: { id: string; acao: string; createdAt: string; resumo: string | null };
+    right: { id: string; acao: string; createdAt: string; resumo: string | null };
+    diff: {
+      metaChanges: { campo: string; de: unknown; para: unknown }[];
+      units: {
+        added: unknown[];
+        removed: unknown[];
+        changed: unknown[];
+        orderChanged: boolean;
+      };
+    };
+  }>(`/admin/acts/${actId}/history-compare?left=${leftId}&right=${rightId}`, {}, token);
 }
 
 export async function fetchDocxPreviewHtml(importId: string, token?: string): Promise<string> {
@@ -287,7 +429,21 @@ export interface ImportDetail {
   lib: string | null;
   status: string;
   estruturaDetectada: {
-    blocos: { tag: string; tipo: string; texto: string; confianca: number; ordem: number }[];
+    blocos: {
+      tag: string;
+      tipo: string;
+      texto: string;
+      confianca: number;
+      ordem: number;
+      parentOrdem?: number | null;
+      formatacao?: {
+        align?: 'left' | 'center' | 'right' | 'justify';
+        bold?: boolean;
+        italic?: boolean;
+        underline?: boolean;
+        letterSpacing?: 'normal' | 'expanded';
+      } | null;
+    }[];
     mediaConfianca: number;
     ocrAprovado?: boolean;
     efeitosSugeridos?: SuggestedImportEffect[];
@@ -364,12 +520,37 @@ export function confirmImport(
     ementa?: string;
     orgaoOrigem?: string;
     efeitosAceitos?: string[];
+    blocos?: {
+      tag: string;
+      tipo: string;
+      texto: string;
+      confianca: number;
+      ordem: number;
+      parentOrdem?: number | null;
+    }[];
   },
 ) {
   return adminFetch<{ actId: string; codigo: string; editorUrl: string }>(
     `/admin/imports/${id}/confirm`,
     { method: 'POST', body: JSON.stringify(meta ?? {}) },
   );
+}
+
+export function updateImportStructure(
+  id: string,
+  blocos: {
+    tag: string;
+    tipo: string;
+    texto: string;
+    confianca: number;
+    ordem: number;
+    parentOrdem?: number | null;
+  }[],
+) {
+  return adminFetch<ImportDetail>(`/admin/imports/${id}/structure`, {
+    method: 'PATCH',
+    body: JSON.stringify({ blocos }),
+  });
 }
 
 export async function fetchImportFileUrl(importId: string): Promise<string> {

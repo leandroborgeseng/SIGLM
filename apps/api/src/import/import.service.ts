@@ -9,6 +9,7 @@ import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { ATTACHMENTS_DIR } from '../common/uploads';
 import { buildActSlug, formatActCode } from '../normative-acts/normative-acts.utils';
+import { recordInternalHistory } from '../normative-acts/act-versioning.utils';
 import { OcrService } from './ocr.service';
 import { mergeOcrPages, parseStructure } from './structure.parser';
 import { parseLegislativeEffects, type SuggestedLegislativeEffect } from './effects.parser';
@@ -279,6 +280,21 @@ export class ImportService {
       orgaoOrigem?: string;
       orgaoOrigemId?: string;
       efeitosAceitos?: string[];
+      blocos?: {
+        tag: string;
+        tipo: string;
+        texto: string;
+        confianca: number;
+        ordem: number;
+        parentOrdem?: number | null;
+        formatacao?: {
+          align?: 'left' | 'center' | 'right' | 'justify';
+          bold?: boolean;
+          italic?: boolean;
+          underline?: boolean;
+          letterSpacing?: 'normal' | 'expanded';
+        } | null;
+      }[];
     },
   ) {
     const imp = await this.getImportDetail(importId);
@@ -291,13 +307,28 @@ export class ImportService {
       throw new BadRequestException('Importação não está pronta para conferência');
     }
 
-    const estrutura = imp.estruturaDetectada as unknown as {
+    if (meta.blocos?.length) {
+      await this.updateDetectedStructure(importId, meta.blocos);
+    }
+
+    const estrutura = (
+      meta.blocos?.length
+        ? { ...(imp.estruturaDetectada as object), blocos: meta.blocos }
+        : imp.estruturaDetectada
+    ) as unknown as {
       blocos: {
         tag: string;
         tipo: string;
         texto: string;
         ordem: number;
         parentOrdem?: number | null;
+        formatacao?: {
+          align?: 'left' | 'center' | 'right' | 'justify';
+          bold?: boolean;
+          italic?: boolean;
+          underline?: boolean;
+          letterSpacing?: 'normal' | 'expanded';
+        } | null;
       }[];
       metadados?: {
         tipo?: string | null;
@@ -333,7 +364,48 @@ export class ImportService {
       }
     }
 
-    const unitBlocks = estrutura.blocos.filter((b) => b.tipo !== 'ementa');
+    // Garante ementa como unidade estruturada (não só metadado)
+    let rawBlocks = [...estrutura.blocos];
+    if (!rawBlocks.some((b) => b.tipo === 'ementa') && ementa) {
+      rawBlocks = [
+        {
+          tag: 'Ementa',
+          tipo: 'ementa',
+          texto: ementa,
+          ordem: -1,
+          parentOrdem: null,
+        },
+        ...rawBlocks,
+      ];
+    }
+    rawBlocks = rawBlocks.map((b) =>
+      b.tipo === 'considerando'
+        ? { ...b, tipo: 'preambulo', tag: 'Preâmbulo' }
+        : b,
+    );
+
+    const merged: typeof rawBlocks = [];
+    const oldOrdemToNew = new Map<number, number>();
+    for (const b of rawBlocks) {
+      const last = merged[merged.length - 1];
+      if (b.tipo === 'preambulo' && last?.tipo === 'preambulo') {
+        last.texto = `${last.texto}\n\n${b.texto}`;
+        oldOrdemToNew.set(b.ordem, merged.length - 1);
+        continue;
+      }
+      if (b.tipo === 'ementa' && last?.tipo === 'ementa') {
+        last.texto = `${last.texto} ${b.texto}`.trim();
+        oldOrdemToNew.set(b.ordem, merged.length - 1);
+        continue;
+      }
+      oldOrdemToNew.set(b.ordem, merged.length);
+      merged.push({ ...b, ordem: merged.length });
+    }
+    const unitBlocks = merged.map((b) => ({
+      ...b,
+      parentOrdem:
+        b.parentOrdem == null ? null : (oldOrdemToNew.get(b.parentOrdem) ?? null),
+    }));
 
     const act = await this.prisma.normativeAct.create({
       data: {
@@ -369,27 +441,26 @@ export class ImportService {
               ? b.tag
               : b.tipo === 'preambulo'
                 ? 'Preâmbulo'
-                : b.tipo === 'considerando'
-                  ? 'Considerando'
+                : b.tipo === 'ementa'
+                  ? 'Ementa'
                   : null,
             texto: b.texto,
             ordem: i,
+            ...(b.tipo === 'texto_simples' && b.formatacao
+              ? { formatacao: b.formatacao as object }
+              : {}),
           })),
         },
       },
       include: { units: { orderBy: { ordem: 'asc' } } },
     });
 
-    // Remapeia parentOrdem dos blocos filtrados (sem ementa)
-    const oldToNewOrdem = new Map(unitBlocks.map((b, i) => [b.ordem, i]));
+    // Remapeia parentOrdem
     const ordemToId = new Map(act.units.map((u) => [u.ordem, u.id]));
     for (const block of unitBlocks) {
       if (block.parentOrdem == null) continue;
-      const newOrdem = oldToNewOrdem.get(block.ordem);
-      const newParent = oldToNewOrdem.get(block.parentOrdem);
-      if (newOrdem == null || newParent == null) continue;
-      const unitId = ordemToId.get(newOrdem);
-      const parentId = ordemToId.get(newParent);
+      const unitId = ordemToId.get(block.ordem);
+      const parentId = ordemToId.get(block.parentOrdem);
       if (!unitId || !parentId) continue;
       await this.prisma.normativeUnit.update({
         where: { id: unitId },
@@ -419,6 +490,7 @@ export class ImportService {
           tipo: imp.formato === 'pdf_ocr' ? 'digitalizado' : 'pdf_original',
           url: `attachments/${storedName}`,
           nome: imp.arquivoOriginal,
+          titulo: 'Arquivo original do ato',
         },
       });
     }
@@ -428,11 +500,72 @@ export class ImportService {
       data: { actId: act.id, status: ImportStatus.rascunho },
     });
 
+    const importOwner = await this.prisma.import.findUnique({
+      where: { id: importId },
+      select: { criadoPorId: true },
+    });
+    await recordInternalHistory(this.prisma, {
+      actId: act.id,
+      userId: importOwner?.criadoPorId,
+      acao: 'importacao',
+      resumo: `Criou rascunho via importação (${imp.formato}) com estrutura revisada na conferência`,
+      withSnapshot: true,
+    });
+
     return {
       actId: act.id,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
       editorUrl: `/admin/atos/${act.id}/editor`,
     };
+  }
+
+  async updateDetectedStructure(
+    importId: string,
+    blocos: {
+      tag: string;
+      tipo: string;
+      texto: string;
+      confianca: number;
+      ordem: number;
+      parentOrdem?: number | null;
+      formatacao?: {
+        align?: 'left' | 'center' | 'right' | 'justify';
+        bold?: boolean;
+        italic?: boolean;
+        underline?: boolean;
+        letterSpacing?: 'normal' | 'expanded';
+      } | null;
+    }[],
+  ) {
+    const imp = await this.prisma.import.findUnique({ where: { id: importId } });
+    if (!imp) throw new NotFoundException('Importação não encontrada');
+    if (imp.status !== 'conferencia') {
+      throw new BadRequestException('Estrutura só pode ser editada em conferência');
+    }
+    if (!imp.estruturaDetectada) {
+      throw new BadRequestException('Nenhuma estrutura detectada');
+    }
+
+    const current = imp.estruturaDetectada as Record<string, unknown>;
+    const normalized = blocos.map((b, i) => ({
+      ...b,
+      ordem: i,
+      texto: b.texto ?? '',
+      tag: b.tag?.trim() || b.tipo,
+      confianca: b.confianca ?? 100,
+    }));
+
+    await this.prisma.import.update({
+      where: { id: importId },
+      data: {
+        estruturaDetectada: {
+          ...current,
+          blocos: normalized,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    return this.getImportDetail(importId);
   }
 
   async getImportDetail(importId: string) {

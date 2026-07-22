@@ -33,7 +33,8 @@ export type UnitType =
   | 'anexo'
   | 'preambulo'
   | 'considerando'
-  | 'ementa';
+  | 'ementa'
+  | 'texto_simples';
 
 export type EffectType =
   | 'alteracao_redacao'
@@ -92,6 +93,13 @@ export interface NormativeUnit {
   tipoUnidade: UnitType;
   identificacao: string | null;
   texto: string;
+  formatacao?: {
+    align?: 'left' | 'center' | 'right' | 'justify';
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    letterSpacing?: 'normal' | 'expanded';
+  } | null;
   ordem: number;
   status: UnitStatus;
   parentUnitId?: string | null;
@@ -110,13 +118,32 @@ export interface ActHistoryItem {
   normaAlteradora: { codigo: string; slug: string } | null;
 }
 
+export interface ActAttachment {
+  id: string;
+  tipo: string;
+  url: string;
+  nome: string;
+  titulo?: string | null;
+  href?: string | null;
+  ordem?: number;
+  ativo?: boolean;
+  downloadUrl?: string | null;
+  adminDownloadUrl?: string | null;
+  directLink?: string | null;
+  criadoEm?: string | null;
+  substituidoEm?: string | null;
+}
+
 export interface ActDetail extends ActSummary {
   dataAto: string | null;
   palavrasChave: string[];
   autoridadeSignataria: string | null;
   units: NormativeUnit[];
   history: ActHistoryItem[];
-  attachments: { id: string; tipo: string; url: string; nome: string; downloadUrl?: string }[];
+  attachments: ActAttachment[];
+  arquivoOriginal?: ActAttachment | null;
+  anexosTopo?: ActAttachment[];
+  anexosFinal?: ActAttachment[];
 }
 
 export interface SearchResponse {
@@ -149,6 +176,7 @@ export interface AdminAct extends ActSummary {
 
 export interface AdminActDetail extends ActDetail {
   statusPublicacao?: string;
+  editionOpen?: boolean;
   hierarchyValid?: boolean;
   observacoesInternas?: string | null;
 }

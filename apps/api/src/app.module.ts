@@ -2,6 +2,7 @@ import { AdministrationModule } from './administration/administration.module';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -17,6 +18,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuditModule,
     AuthModule,
     NormativeActsModule,
+    AttachmentsModule,
     ConsolidationModule,
     ImportModule,
     ExportModule,

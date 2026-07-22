@@ -24,6 +24,8 @@ const PERMISSIONS = [
   'ocr:review',
   'users:manage',
   'audit:read',
+  'acts:version',
+  'acts:history',
 ] as const;
 
 const ROLES: Record<string, { descricao: string; permissions: string[] }> = {
@@ -33,19 +35,26 @@ const ROLES: Record<string, { descricao: string; permissions: string[] }> = {
   },
   editor: {
     descricao: 'Editor legislativo',
-    permissions: ['acts:read', 'acts:write', 'imports:manage', 'ocr:review'],
+    permissions: [
+      'acts:read',
+      'acts:write',
+      'acts:version',
+      'acts:history',
+      'imports:manage',
+      'ocr:review',
+    ],
   },
   revisor: {
     descricao: 'Revisor de textos normativos',
-    permissions: ['acts:read', 'acts:write'],
+    permissions: ['acts:read', 'acts:write', 'acts:version', 'acts:history'],
   },
   publicador: {
     descricao: 'Publicador no portal',
-    permissions: ['acts:read', 'acts:publish'],
+    permissions: ['acts:read', 'acts:publish', 'acts:history'],
   },
   consulta: {
     descricao: 'Consulta administrativa (sem edição)',
-    permissions: ['acts:read', 'audit:read'],
+    permissions: ['acts:read', 'audit:read', 'acts:history'],
   },
 };
 

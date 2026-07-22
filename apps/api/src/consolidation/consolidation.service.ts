@@ -13,11 +13,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { formatActCode } from '../normative-acts/normative-acts.utils';
 import { refreshSearchVector } from '../normative-acts/search.utils';
-import { isValidParent } from '../normative-acts/unit-hierarchy.utils';
 import { ApplyConsolidationDto, ConsolidationPreviewDto } from './consolidation.dto';
-import {
-  computeInclusionPlacement,
-} from './inclusion-placement.utils';
+import { computeInclusionPlacement } from './inclusion-placement.utils';
 
 @Injectable()
 export class ConsolidationService {
@@ -47,7 +44,12 @@ export class ConsolidationService {
     if (!act) throw new NotFoundException('Ato não encontrado');
 
     const units = await this.prisma.normativeUnit.findMany({
-      where: { actId },
+      where: {
+        actId,
+        tipoUnidade: {
+          notIn: [UnitType.texto_simples, UnitType.preambulo, UnitType.considerando],
+        },
+      },
       orderBy: { ordem: 'asc' },
       select: {
         id: true,
@@ -261,14 +263,7 @@ export class ConsolidationService {
       if (!ref) {
         throw new BadRequestException('Dispositivo de referência não encontrado na norma alterada');
       }
-      if (
-        dto.posicionamento === InclusaoPosicionamento.dentro_de &&
-        !isValidParent(tipoUnidade, ref.tipoUnidade)
-      ) {
-        throw new BadRequestException(
-          `Tipo ${tipoUnidade} não pode ser inserido dentro de ${ref.tipoUnidade}`,
-        );
-      }
+      // Inclusão atípica é permitida (atos antigos / estruturas não convencionais).
       const placement = computeInclusionPlacement(
         existingUnits,
         dto.referenciaUnitId,

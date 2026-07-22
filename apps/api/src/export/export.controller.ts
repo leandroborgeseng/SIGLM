@@ -50,8 +50,11 @@ export class ExportController {
       where: { id },
       include: { act: { select: { statusPublicacao: true } } },
     });
-    if (!attachment || attachment.act.statusPublicacao !== 'publicado') {
+    if (!attachment || !attachment.ativo || attachment.act.statusPublicacao !== 'publicado') {
       throw new NotFoundException('Anexo não encontrado');
+    }
+    if (!attachment.url) {
+      throw new NotFoundException('Arquivo não disponível');
     }
 
     let filePath = resolveUploadPath(attachment.url);

@@ -1,9 +1,12 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -11,6 +14,28 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ActSituacao, ActType, EffectType, InclusaoPosicionamento, UnitType } from '@prisma/client';
+
+export class UnitFormatacaoDto {
+  @IsOptional()
+  @IsIn(['left', 'center', 'right', 'justify'])
+  align?: 'left' | 'center' | 'right' | 'justify';
+
+  @IsOptional()
+  @IsBoolean()
+  bold?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  italic?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  underline?: boolean;
+
+  @IsOptional()
+  @IsIn(['normal', 'expanded'])
+  letterSpacing?: 'normal' | 'expanded';
+}
 
 export class CreateActDto {
   @IsEnum(ActType)
@@ -24,9 +49,10 @@ export class CreateActDto {
   @Min(1900)
   ano!: number;
 
+  @IsOptional()
   @IsString()
-  @MinLength(3)
-  ementa!: string;
+  @MinLength(0)
+  ementa?: string;
 
   @IsOptional()
   @IsString()
@@ -124,6 +150,12 @@ export class UnitInputDto {
   @IsOptional()
   @IsString()
   parentUnitId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => UnitFormatacaoDto)
+  formatacao?: UnitFormatacaoDto | null;
 }
 
 export class LegislativeEffectInputDto {
@@ -209,4 +241,15 @@ export class AddUnitDto {
   @IsOptional()
   @IsString()
   parentUnitId?: string | null;
+
+  /** Inserir imediatamente após este elemento (e sua subárvore). */
+  @IsOptional()
+  @IsString()
+  afterUnitId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => UnitFormatacaoDto)
+  formatacao?: UnitFormatacaoDto | null;
 }

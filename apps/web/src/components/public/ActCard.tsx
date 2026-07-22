@@ -10,7 +10,7 @@ export function ActCard({ act }: { act: ActSummary }) {
       className="group block rounded-[14px] border border-line bg-surface p-5 shadow-sm transition-all hover:border-brand hover:shadow-md"
     >
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[13px] font-semibold text-brand">{act.codigo}</span>
+        <span className="text-[13px] font-semibold text-brand">{act.codigo}</span>
         <StatusBadge situacao={act.situacao} label={SITUACAO_LABELS[act.situacao]} />
       </div>
       <p className="mb-3 line-clamp-2 text-[14px] leading-snug text-ink">{act.ementa}</p>

@@ -5,6 +5,8 @@ export type AdminPermission =
   | 'acts:read'
   | 'acts:write'
   | 'acts:publish'
+  | 'acts:version'
+  | 'acts:history'
   | 'acts:consolidate'
   | 'imports:manage'
   | 'ocr:review'

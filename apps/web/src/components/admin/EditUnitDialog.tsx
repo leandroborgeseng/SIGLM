@@ -4,18 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
 import {
-  type AddContext,
   DIVISION_TYPES,
   getParentOptions,
   hasEmentaUnit,
   HIERARCHY_TYPES,
   isRecommendedParent,
   isStructuralType,
-  isTextGroupType,
-  suggestParentId,
-  suggestTypesForContext,
   TEXT_GROUP_TYPES,
   UNIT_TYPE_LABELS,
+  validateUnitsHierarchy,
 } from '@/lib/unit-hierarchy';
 import {
   DEFAULT_TEXTO_SIMPLES_FORMAT,
@@ -33,23 +30,22 @@ function categoryOf(tipo: UnitType): Category {
   return 'dispositivos';
 }
 
-export function AddUnitDialog({
+export function EditUnitDialog({
   open,
+  unit,
   units,
-  context = { mode: 'end' },
   onClose,
-  onConfirm,
+  onSave,
 }: {
   open: boolean;
+  unit: NormativeUnit | null;
   units: NormativeUnit[];
-  context?: AddContext;
   onClose: () => void;
-  onConfirm: (payload: {
+  onSave: (patch: {
     tipoUnidade: UnitType;
-    identificacao?: string;
-    texto?: string;
-    parentUnitId?: string | null;
-    afterUnitId?: string | null;
+    identificacao: string | null;
+    texto: string;
+    parentUnitId: string | null;
     formatacao?: UnitFormatacao | null;
   }) => void;
 }) {
@@ -57,31 +53,26 @@ export function AddUnitDialog({
   const [tipo, setTipo] = useState<UnitType>('artigo');
   const [identificacao, setIdentificacao] = useState('');
   const [titulo, setTitulo] = useState('');
-  const [parentUnitId, setParentUnitId] = useState<string>('');
+  const [parentUnitId, setParentUnitId] = useState('');
   const [formatacao, setFormatacao] = useState<UnitFormatacao>({
     ...DEFAULT_TEXTO_SIMPLES_FORMAT,
   });
   const [error, setError] = useState('');
 
-  const ementaExists = hasEmentaUnit(units);
-  const suggestedTypes = useMemo(
-    () => suggestTypesForContext(context, units),
-    [context, units],
-  );
-
   useEffect(() => {
-    if (!open) return;
-    const preferred =
-      suggestedTypes.find((t) => !isTextGroupType(t) || t === 'texto_simples') ?? 'artigo';
-    setCategory(categoryOf(preferred));
-    setTipo(preferred);
-    const suggested = suggestParentId(preferred, units, context);
-    setParentUnitId(suggested ?? '');
-    setIdentificacao('');
-    setTitulo('');
-    setFormatacao({ ...DEFAULT_TEXTO_SIMPLES_FORMAT });
+    if (!unit || !open) return;
+    const cat = categoryOf(unit.tipoUnidade);
+    setCategory(cat);
+    setTipo(unit.tipoUnidade === 'considerando' ? 'preambulo' : unit.tipoUnidade);
+    setIdentificacao(unit.identificacao ?? '');
+    setTitulo(unit.texto ?? '');
+    setParentUnitId(unit.parentUnitId ?? '');
+    setFormatacao({
+      ...DEFAULT_TEXTO_SIMPLES_FORMAT,
+      ...(unit.formatacao ?? {}),
+    });
     setError('');
-  }, [open, context.anchorId, context.mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [unit, open]);
 
   const typeOptions =
     category === 'divisoes'
@@ -91,8 +82,8 @@ export function AddUnitDialog({
         : HIERARCHY_TYPES;
 
   const parentOptions = useMemo(
-    () => getParentOptions(tipo, units),
-    [tipo, units],
+    () => getParentOptions(tipo, units.filter((u) => u.id !== unit?.id), unit?.id),
+    [tipo, units, unit?.id],
   );
 
   const isDivision = isStructuralType(tipo);
@@ -100,59 +91,64 @@ export function AddUnitDialog({
   const isSimple = tipo === 'texto_simples';
   const isEmenta = tipo === 'ementa';
   const isPreambulo = tipo === 'preambulo';
+  const otherEmentaExists =
+    Boolean(unit) &&
+    hasEmentaUnit(units.filter((u) => u.id !== unit?.id)) &&
+    isEmenta;
 
   const parentUnit = parentUnitId ? units.find((u) => u.id === parentUnitId) : null;
   const nonstandard =
     Boolean(parentUnit) && !isRecommendedParent(tipo, parentUnit!.tipoUnidade);
 
-  const contextLabel =
-    context.mode === 'inside' && context.anchorId
-      ? `Dentro de ${units.find((u) => u.id === context.anchorId)?.identificacao ?? 'elemento'}`
-      : context.mode === 'after' && context.anchorId
-        ? `Após ${units.find((u) => u.id === context.anchorId)?.identificacao ?? 'elemento'}`
-        : 'Ao final da estrutura';
+  if (!open || !unit) return null;
 
-  if (!open) return null;
-
-  const applyTipo = (next: UnitType) => {
-    setTipo(next);
-    setParentUnitId(suggestParentId(next, units, context) ?? '');
-    setError('');
-  };
-
-  const handleConfirm = () => {
-    setError('');
-    if (isEmenta && ementaExists) {
-      setError('Este ato já possui Ementa. Edite a existente em vez de incluir outra.');
+  const handleSave = () => {
+    if (otherEmentaExists) {
+      setError('Este ato já possui Ementa. Não é permitido duplicar.');
       return;
     }
-    if ((isEmenta || isPreambulo || isSimple) && !titulo.trim()) {
+    if (isTextGroup && !titulo.trim()) {
       setError('Informe o conteúdo do elemento.');
       return;
     }
 
-    const afterUnitId =
-      context.mode === 'after' && context.anchorId ? context.anchorId : null;
+    const nextParent = isTextGroup ? null : parentUnitId || null;
+    const nextTexto = isDivision || isTextGroup ? titulo : unit.texto;
+    const nextIdent = isSimple
+      ? null
+      : isEmenta
+        ? 'Ementa'
+        : isPreambulo
+          ? 'Preâmbulo'
+          : identificacao.trim() || null;
 
-    if (isTextGroup) {
-      onConfirm({
-        tipoUnidade: tipo,
-        identificacao: isEmenta ? 'Ementa' : isPreambulo ? 'Preâmbulo' : undefined,
-        texto: titulo.trim() || ' ',
-        parentUnitId: null,
-        afterUnitId,
-        formatacao: isSimple ? formatacao : null,
-      });
-    } else {
-      onConfirm({
-        tipoUnidade: tipo,
-        identificacao: identificacao.trim() || undefined,
-        texto: isDivision ? titulo.trim() || undefined : undefined,
-        parentUnitId: parentUnitId || null,
-        afterUnitId,
-        formatacao: null,
-      });
+    const nextUnits = units.map((u) =>
+      u.id === unit.id
+        ? {
+            ...u,
+            tipoUnidade: tipo,
+            identificacao: nextIdent,
+            texto: nextTexto,
+            parentUnitId: nextParent,
+            formatacao: isSimple ? formatacao : null,
+          }
+        : u,
+    );
+
+    if (!validateUnitsHierarchy(nextUnits)) {
+      setError(
+        'A alteração criaria uma estrutura inconsistente (ciclo, pai inexistente ou ordem inválida). Ajuste o vínculo ou a posição.',
+      );
+      return;
     }
+
+    onSave({
+      tipoUnidade: tipo,
+      identificacao: nextIdent,
+      texto: nextTexto,
+      parentUnitId: nextParent,
+      formatacao: isSimple ? formatacao : null,
+    });
     onClose();
   };
 
@@ -161,12 +157,11 @@ export function AddUnitDialog({
       <div
         className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-[14px] border border-line bg-surface p-6 shadow-lg"
         role="dialog"
-        aria-labelledby="add-unit-title"
+        aria-labelledby="edit-unit-title"
       >
-        <h3 id="add-unit-title" className="text-page-title mb-1 text-[18px]">
-          Adicionar elemento
+        <h3 id="edit-unit-title" className="mb-4 text-[18px] font-semibold">
+          Editar elemento
         </h3>
-        <p className="mb-4 text-[12px] text-ink-3">{contextLabel}</p>
 
         <div className="mb-4 flex flex-wrap gap-2">
           {(
@@ -181,7 +176,9 @@ export function AddUnitDialog({
               type="button"
               onClick={() => {
                 setCategory(tab.id);
-                applyTipo(tab.defaultTipo);
+                setTipo(tab.defaultTipo);
+                setParentUnitId('');
+                setError('');
               }}
               className={`flex-1 rounded-[10px] border px-3 py-2 text-[13px] font-semibold ${
                 category === tab.id
@@ -199,37 +196,23 @@ export function AddUnitDialog({
             <label className="mb-1 block text-[12px] text-ink-3">Tipo</label>
             <Select
               value={tipo}
-              onChange={(e) => applyTipo(e.target.value as UnitType)}
+              onChange={(e) => {
+                setTipo(e.target.value as UnitType);
+                setError('');
+              }}
             >
-              {typeOptions.map((t) => {
-                const suggested = suggestedTypes.includes(t);
-                return (
-                  <option key={t} value={t} disabled={t === 'ementa' && ementaExists}>
-                    {suggested ? '★ ' : ''}
-                    {UNIT_TYPE_LABELS[t]}
-                    {t === 'ementa' && ementaExists ? ' (já cadastrada)' : ''}
-                    {suggested ? ' — sugerido' : ''}
-                  </option>
-                );
-              })}
+              {typeOptions.map((t) => (
+                <option key={t} value={t}>
+                  {UNIT_TYPE_LABELS[t]}
+                </option>
+              ))}
             </Select>
-            {suggestedTypes.length > 0 && (
-              <p className="mt-1 text-[11px] text-ink-4">
-                Tipos marcados com ★ são os mais adequados para esta posição; os demais
-                permanecem disponíveis.
-              </p>
-            )}
           </div>
 
           {!isTextGroup && (
             <div>
-              <label className="mb-1 block text-[12px] text-ink-3">
-                Vincular a (sugerido — editável)
-              </label>
-              <Select
-                value={parentUnitId}
-                onChange={(e) => setParentUnitId(e.target.value)}
-              >
+              <label className="mb-1 block text-[12px] text-ink-3">Vincular a</label>
+              <Select value={parentUnitId} onChange={(e) => setParentUnitId(e.target.value)}>
                 <option value="">Nenhum (nível superior)</option>
                 {parentOptions.recommended.length > 0 && (
                   <optgroup label="Recomendados">
@@ -254,8 +237,7 @@ export function AddUnitDialog({
               </Select>
               {nonstandard && (
                 <p className="mt-1 text-[12px] text-warn">
-                  Este vínculo foge do padrão legislativo usual. A inclusão será permitida
-                  para reproduzir fielmente o ato publicado.
+                  Este vínculo foge do padrão legislativo usual, mas será preservado.
                 </p>
               )}
             </div>
@@ -263,12 +245,12 @@ export function AddUnitDialog({
 
           {!isTextGroup && (
             <div>
-              <label className="mb-1 block text-[12px] text-ink-3">Identificação (opcional)</label>
+              <label className="mb-1 block text-[12px] text-ink-3">Identificação</label>
               <Input
                 value={identificacao}
                 onChange={(e) => setIdentificacao(e.target.value)}
                 placeholder={
-                  isDivision ? 'Ex.: TÍTULO II, CAPÍTULO III, ANEXO I' : 'Ex.: Art. 5º, § 1º, I'
+                  isDivision ? 'Ex.: TÍTULO II, CAPÍTULO III' : 'Ex.: Art. 5º, § 1º, I'
                 }
               />
             </div>
@@ -282,15 +264,6 @@ export function AddUnitDialog({
               <textarea
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
-                placeholder={
-                  isEmenta
-                    ? 'Texto da ementa oficial do ato…'
-                    : isPreambulo
-                      ? 'Ex.: O PREFEITO MUNICIPAL…\n\nCONSIDERANDO …'
-                      : isSimple
-                        ? 'Ex.: DECRETA…'
-                        : 'Ex.: DISPOSIÇÕES GERAIS'
-                }
                 className="min-h-[96px] w-full rounded-[10px] border border-line px-3.5 py-2 text-[13.5px] focus-ring"
               />
             </div>
@@ -352,9 +325,7 @@ export function AddUnitDialog({
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={handleConfirm} disabled={isEmenta && ementaExists}>
-            Adicionar
-          </Button>
+          <Button onClick={handleSave}>Salvar</Button>
         </div>
       </div>
     </div>

@@ -39,7 +39,7 @@ export default function AdminLoginPage() {
     <div className="flex min-h-dvh">
       <div className="hero-gradient hidden flex-1 flex-col justify-between p-12 lg:flex">
         <div className="flex items-center gap-3">
-          <FrancaMark size={46} shadow priority />
+          <FrancaMark size={48} shadow priority />
           <div className="leading-tight">
             <div className="text-[18px] font-bold tracking-tight text-white">Portal de Legislação</div>
             <div className="text-[12px] text-white/80">Painel administrativo</div>

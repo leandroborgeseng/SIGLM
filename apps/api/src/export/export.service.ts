@@ -3,7 +3,8 @@ import PDFDocument from 'pdfkit';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatActCode, formatFormalTitle, SITUACAO_LABELS, parseSlug } from '../normative-acts/normative-acts.utils';
-import { renderConsolidatedHtml, sortUnitsForDisplay, type ExportAct } from './act-html.renderer';
+import { renderConsolidatedHtml, sortUnitsForDisplay, unitHtmlToPlainText, type ExportAct } from './act-html.renderer';
+import { parseFormatacao } from '../common/rich-text.utils';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const dejavuRoot = path.dirname(require.resolve('dejavu-fonts-ttf/package.json'));
@@ -50,6 +51,7 @@ export class ExportService {
         tipoUnidade: u.tipoUnidade,
         identificacao: u.identificacao,
         texto: u.texto,
+        formatacao: parseFormatacao(u.formatacao),
         ordem: u.ordem,
         status: u.status,
         nota: notesByUnit.get(u.id) ?? null,
@@ -134,16 +136,34 @@ export class ExportService {
     ].includes(unit.tipoUnidade);
     const isPreamble = unit.tipoUnidade === 'preambulo';
     const isConsiderando = unit.tipoUnidade === 'considerando';
+    const isSimple = unit.tipoUnidade === 'texto_simples';
     const isRevoked = unit.status === 'revogada';
+    const plain = unitHtmlToPlainText(unit.texto);
+    const fmt = parseFormatacao(unit.formatacao);
+
+    if (isSimple) {
+      const align = (fmt?.align ?? 'center') as 'left' | 'center' | 'right' | 'justify';
+      if (fmt?.bold) doc.font('serif-bold');
+      else doc.font('serif');
+      doc.fontSize(11).fillColor('#0F1B2D');
+      const opts: { align: typeof align; lineGap: number; characterSpacing?: number } = {
+        align,
+        lineGap: 3,
+      };
+      if (fmt?.letterSpacing === 'expanded') opts.characterSpacing = 2.5;
+      doc.text(plain, opts);
+      doc.moveDown(0.5);
+      return;
+    }
 
     if (isConsiderando) {
-      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(unit.texto, { align: 'justify', lineGap: 3 });
+      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(plain, { align: 'justify', lineGap: 3 });
       doc.moveDown(0.4);
       return;
     }
 
     if (isPreamble) {
-      doc.font('serif').fontSize(11).fillColor('#36465B').text(unit.texto, { align: 'center' });
+      doc.font('serif').fontSize(11).fillColor('#36465B').text(plain, { align: 'center' });
       doc.moveDown(0.75);
       return;
     }
@@ -151,7 +171,7 @@ export class ExportService {
     if (isStructural) {
       doc.font('serif-bold').fontSize(11).fillColor('#0F1B2D');
       if (unit.identificacao) doc.text(unit.identificacao, { align: 'center' });
-      doc.text(unit.texto, { align: 'center' });
+      doc.text(plain, { align: 'center' });
       doc.moveDown(0.75);
       return;
     }
@@ -162,13 +182,13 @@ export class ExportService {
       const prefix = unit.identificacao ? `${unit.identificacao} ` : '';
       doc.font('serif-bold').fontSize(11).fillColor(isRevoked ? '#97A3B6' : '#0F1B2D');
       if (isRevoked) {
-        doc.text(prefix + unit.texto, { strike: true, lineGap: 4 });
+        doc.text(prefix + plain, { strike: true, lineGap: 4 });
       } else {
         doc.text(prefix, { continued: true });
-        doc.font('serif').text(unit.texto, { lineGap: 4 });
+        doc.font('serif').text(plain, { lineGap: 4 });
       }
     } else {
-      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(unit.texto, { indent: 24, lineGap: 3 });
+      doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(plain, { indent: 24, lineGap: 3 });
     }
 
     if (unit.nota) {

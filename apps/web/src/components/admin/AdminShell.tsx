@@ -58,7 +58,7 @@ export function AdminSidebar() {
     <>
       <aside className="hidden w-[264px] shrink-0 flex-col border-r border-line bg-surface lg:flex">
         <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
-          <FrancaMark size={34} />
+          <FrancaMark size={36} />
           <div className="leading-tight">
             <div className="text-[16px] font-bold tracking-tight text-ink">Legislação</div>
             <div className="text-[10.5px] font-medium text-ink-3">Painel administrativo</div>
@@ -81,7 +81,7 @@ export function AdminSidebar() {
           <aside className="relative flex h-full w-[min(100%,280px)] flex-col bg-surface shadow-lg">
             <div className="flex h-[60px] items-center justify-between border-b border-line px-4">
               <div className="flex items-center gap-2">
-                <FrancaMark size={32} />
+                <FrancaMark size={34} />
                 <span className="text-[14px] font-semibold">Menu</span>
               </div>
               <button

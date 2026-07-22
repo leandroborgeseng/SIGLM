@@ -7,6 +7,13 @@ export interface StructureBlock {
   confianca: number;
   ordem: number;
   parentOrdem?: number | null;
+  formatacao?: {
+    align?: 'left' | 'center' | 'right' | 'justify';
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    letterSpacing?: 'normal' | 'expanded';
+  } | null;
 }
 
 export interface DetectedStructure {
@@ -19,7 +26,9 @@ export interface DetectedStructure {
 
 const EMENTA_RE = /^(?:EMENTA|Ementa)[:\s]/i;
 const CONSIDERANDO_RE = /^CONSIDERANDO\b/i;
-const PREAMBULO_RE = /Faço saber|Faço saber que/i;
+/** Fórmula introdutória da autoridade / abertura do preâmbulo (não inclui fórmulas DECRETA etc.). */
+const PREAMBULO_RE =
+  /^(?:O\s+PREFEITO|A\s+PREFEITA|O\s+PRESIDENTE|A\s+PRESIDENTA|Faço saber que|FAÇO SABER QUE)\b/i;
 const PARTE_RE = /^(PARTE)\s+(.+)$/i;
 const LIVRO_RE = /^(LIVRO)\s+(.+)$/i;
 const TITULO_RE = /^(T[IÍ]TULO)\s+(.+)$/i;
@@ -36,6 +45,14 @@ const PARAGRAFO_NUM_RE = /^Par[áa]grafo\s+(\d+)\s*[°ºoO]?\.?\s*(.*)$/i;
 const INCISO_RE = /^([IVXLCDM]{1,6})\s*[-–—.;]\s*(.+)$/i;
 const ALINEA_RE = /^([a-z])\)\s*(.+)$/i;
 const ITEM_RE = /^(\d{1,2})\.\s+(.+)$/;
+
+/** Expressões e blocos tipicamente não estruturais. */
+const TEXTO_SIMPLES_FORMULA_RE =
+  /^(?:D\s*E\s*C\s*R\s*E\s*T\s*A|R\s*E\s*S\s*O\s*L\s*V\s*E|F\s*A\s*Z\s+S\s*A\s*B\s*E\s*R)\.?$/i;
+const TEXTO_SIMPLES_INTRO_RE =
+  /^(?:DECRETA|RESOLVE|FAZ SABER|FAÇO SABER|PROMULGA|SANCIONA)\b/i;
+const TEXTO_SIMPLES_ASSINATURA_RE =
+  /^(?:Prefeitura Municipal|Gabinete do|Palácio|Sala das Sessões|O Prefeito|A Prefeita|Prefeito Municipal|aos\s+\d{1,2}\s+de\s+)/i;
 
 type StackEntry = { tipo: string; ordem: number };
 
@@ -85,15 +102,40 @@ function pushBlock(
   tag: string,
   texto: string,
   confianca: number,
+  formatacao?: StructureBlock['formatacao'],
 ) {
+  const last = blocos[blocos.length - 1];
+  // Agrupa fórmula introdutória + considerandos em um único Preâmbulo
+  if (tipo === 'preambulo' && last?.tipo === 'preambulo') {
+    last.texto = `${last.texto}\n\n${texto.trim()}`;
+    last.confianca = Math.round((last.confianca + confianca) / 2);
+    return;
+  }
+  if (tipo === 'ementa' && last?.tipo === 'ementa') {
+    last.texto = `${last.texto} ${texto.trim()}`.trim();
+    return;
+  }
+
   const parentOrdem = stack.length > 0 ? stack[stack.length - 1].ordem : null;
   const ordem = blocos.length;
-  blocos.push({ tag, tipo, texto: texto.trim(), confianca, ordem, parentOrdem });
+  blocos.push({
+    tag,
+    tipo,
+    texto: texto.trim(),
+    confianca,
+    ordem,
+    parentOrdem,
+    ...(formatacao ? { formatacao } : {}),
+  });
   stack.push({ tipo, ordem });
 }
 
 function appendToLastBlock(blocos: StructureBlock[], line: string) {
   const last = blocos[blocos.length - 1];
+  if (last.tipo === 'preambulo') {
+    last.texto = last.texto ? `${last.texto}\n${line}` : line;
+    return;
+  }
   last.texto = last.texto ? `${last.texto} ${line}` : line;
 }
 
@@ -145,10 +187,40 @@ function divisionTag(label: string, rest: string): { tag: string; texto: string 
   };
 }
 
-function detectLine(line: string): { tipo: string; tag: string; texto: string } | null {
+function detectLine(line: string): {
+  tipo: string;
+  tag: string;
+  texto: string;
+  formatacao?: StructureBlock['formatacao'];
+} | null {
   if (isFormalTitleLine(line)) {
     return null; // título formal vai para metadados, não para unidades
   }
+
+  if (TEXTO_SIMPLES_FORMULA_RE.test(line.replace(/\s+/g, ' ').trim()) || TEXTO_SIMPLES_INTRO_RE.test(line)) {
+    const compact = line.replace(/\s+/g, ' ').trim();
+    const isExpanded = /D\s+E\s+C\s+R\s+E\s+T\s+A/i.test(line) || /^D\s*E\s*C\s*R\s*E\s*T\s*A/i.test(line);
+    return {
+      tipo: 'texto_simples',
+      tag: 'Texto simples',
+      texto: compact.replace(/\s+/g, ' ').replace(/D E C R E T A/i, 'DECRETA').replace(/R E S O L V E/i, 'RESOLVE'),
+      formatacao: {
+        align: 'center',
+        bold: true,
+        letterSpacing: isExpanded || /DECRETA|RESOLVE/i.test(compact) ? 'expanded' : 'normal',
+      },
+    };
+  }
+
+  if (TEXTO_SIMPLES_ASSINATURA_RE.test(line)) {
+    return {
+      tipo: 'texto_simples',
+      tag: 'Texto simples',
+      texto: line,
+      formatacao: { align: 'center', italic: false },
+    };
+  }
+
   if (EMENTA_RE.test(line)) {
     return {
       tipo: 'ementa',
@@ -156,10 +228,7 @@ function detectLine(line: string): { tipo: string; tag: string; texto: string } 
       texto: line.replace(/^EMENTA[:\s]*/i, '').trim() || line,
     };
   }
-  if (CONSIDERANDO_RE.test(line)) {
-    return { tipo: 'considerando', tag: 'Considerando', texto: line };
-  }
-  if (PREAMBULO_RE.test(line)) {
+  if (CONSIDERANDO_RE.test(line) || PREAMBULO_RE.test(line)) {
     return { tipo: 'preambulo', tag: 'Preâmbulo', texto: line };
   }
 
@@ -276,6 +345,30 @@ function handleUnmarkedLine(
   line: string,
   baseConfidence: number,
 ) {
+  // Linhas curtas em maiúsculas após dispositivos → texto simples (assinatura / fórmula)
+  const looksLikeSimple =
+    line.length <= 120 &&
+    /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9\s.,;:ºª/-]+$/.test(line) &&
+    !ARTICLE_RE.test(line) &&
+    blocos.some((b) => ['artigo', 'paragrafo', 'paragrafo_unico', 'inciso'].includes(b.tipo));
+
+  if (looksLikeSimple && blocos.length > 0) {
+    const last = blocos[blocos.length - 1];
+    if (last.tipo !== 'texto_simples') {
+      trimStackForType(stack, 'texto_simples');
+      pushBlock(
+        blocos,
+        stack,
+        'texto_simples',
+        'Texto simples',
+        line,
+        Math.max(65, baseConfidence - 10),
+        { align: 'center' },
+      );
+      return;
+    }
+  }
+
   if (blocos.length > 0) {
     appendToLastBlock(blocos, line);
     return;
@@ -320,7 +413,15 @@ export function parseStructure(
     const detected = detectLine(line);
     if (detected) {
       trimStackForType(stack, detected.tipo);
-      pushBlock(blocos, stack, detected.tipo, detected.tag, detected.texto, baseConfidence);
+      pushBlock(
+        blocos,
+        stack,
+        detected.tipo,
+        detected.tag,
+        detected.texto,
+        baseConfidence,
+        detected.formatacao,
+      );
     } else {
       handleUnmarkedLine(blocos, stack, line, baseConfidence);
     }

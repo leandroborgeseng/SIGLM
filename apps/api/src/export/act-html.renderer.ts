@@ -1,10 +1,19 @@
 import type { ActType, UnitType } from '@prisma/client';
 import { formatActCode, formatFormalTitle, SITUACAO_LABELS } from '../normative-acts/normative-acts.utils';
+import {
+  escapeHtml,
+  formatacaoToCss,
+  parseFormatacao,
+  sanitizeUnitHtml,
+  unitHtmlToPlainText,
+  type UnitFormatacao,
+} from '../common/rich-text.utils';
 
 export interface ExportUnit {
   tipoUnidade: UnitType;
   identificacao: string | null;
   texto: string;
+  formatacao?: UnitFormatacao | null;
   ordem: number;
   status: import('@prisma/client').UnitStatus;
   nota: string | null;
@@ -23,14 +32,6 @@ export interface ExportAct {
   units: ExportUnit[];
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 function formatDateBr(date: Date | null): string {
   if (!date) return '—';
   return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
@@ -43,24 +44,25 @@ function noteClass(nota: string | null): string {
   return 'note note-warn';
 }
 
-/** Ordem de exibição: considerandos → preâmbulo → demais (exceto ementa). */
+/** Ordem de exibição: ementa → preâmbulo → demais. */
 export function sortUnitsForDisplay<T extends { tipoUnidade: string; ordem: number }>(
   units: T[],
 ): T[] {
   const weight = (tipo: string) => {
-    if (tipo === 'ementa') return 99;
-    if (tipo === 'considerando') return 0;
-    if (tipo === 'preambulo') return 1;
+    if (tipo === 'ementa') return 0;
+    if (tipo === 'preambulo' || tipo === 'considerando') return 1;
     return 2;
   };
-  return [...units]
-    .filter((u) => u.tipoUnidade !== 'ementa')
-    .sort((a, b) => {
-      const wa = weight(a.tipoUnidade);
-      const wb = weight(b.tipoUnidade);
-      if (wa !== wb) return wa - wb;
-      return a.ordem - b.ordem;
-    });
+  return [...units].sort((a, b) => {
+    const wa = weight(a.tipoUnidade);
+    const wb = weight(b.tipoUnidade);
+    if (wa !== wb) return wa - wb;
+    return a.ordem - b.ordem;
+  });
+}
+
+function richText(html: string): string {
+  return sanitizeUnitHtml(html);
 }
 
 function renderUnit(unit: ExportUnit): string {
@@ -75,18 +77,33 @@ function renderUnit(unit: ExportUnit): string {
     'subsecao',
     'anexo',
   ].includes(unit.tipoUnidade);
-  const isPreamble = unit.tipoUnidade === 'preambulo';
-  const isConsiderando = unit.tipoUnidade === 'considerando';
+  const isPreamble = unit.tipoUnidade === 'preambulo' || unit.tipoUnidade === 'considerando';
+  const isEmenta = unit.tipoUnidade === 'ementa';
+  const isSimple = unit.tipoUnidade === 'texto_simples';
   const isRevoked = unit.status === 'revogada';
   const revokedClass = isRevoked ? ' revoked' : '';
   const id = unit.identificacao?.replace(/\s+/g, '-').toLowerCase() ?? `unit-${unit.ordem}`;
-  const texto = escapeHtml(unit.texto);
+  const texto = richText(unit.texto);
 
-  if (isConsiderando) {
-    return `<p class="considerando">${texto}</p>`;
+  if (isEmenta) {
+    return `<p class="ementa">${texto}</p>`;
+  }
+  if (isSimple) {
+    const fmt = parseFormatacao(unit.formatacao);
+    const style = formatacaoToCss(fmt);
+    return `<p class="texto-simples"${style ? ` style="${style}"` : ''}>${texto}</p>`;
   }
   if (isPreamble) {
-    return `<p class="preamble">${texto}</p>`;
+    const parts = unit.texto
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length <= 1) {
+      return `<div class="preamble">${texto}</div>`;
+    }
+    return `<div class="preamble">${parts
+      .map((p) => `<p>${richText(p.replace(/\n/g, '<br/>'))}</p>`)
+      .join('')}</div>`;
   }
   if (isStructural) {
     const ident = unit.identificacao
@@ -107,7 +124,9 @@ export function renderConsolidatedHtml(act: ExportAct): string {
   const codigo = formatActCode(act.tipo, act.numero, act.ano);
   const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
   const situacao = SITUACAO_LABELS[act.situacao] ?? act.situacao;
-  const unitsHtml = sortUnitsForDisplay(act.units)
+  const sorted = sortUnitsForDisplay(act.units);
+  const hasEmentaUnit = sorted.some((u) => u.tipoUnidade === 'ementa');
+  const unitsHtml = sorted
     .map((unit) => {
       const body = renderUnit(unit);
       const nota = unit.nota
@@ -127,14 +146,16 @@ export function renderConsolidatedHtml(act: ExportAct): string {
     :root { --ink:#0f1b2d; --ink-2:#36465b; --ink-3:#647389; --ink-4:#97a3b6; --brand:#0066cc; --warn:#b5680a; --danger:#d62b2b; --ok:#15924e; }
     * { box-sizing: border-box; }
     body { margin: 0; padding: 2rem 1.25rem 3rem; font-family: Georgia, "Times New Roman", serif; color: var(--ink); background: #fff; line-height: 1.75; font-size: 15px; }
+    a { color: var(--brand); text-decoration: underline; }
     .brand { text-align: center; font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink-3); margin-bottom: 1.5rem; }
     .header { max-width: 900px; margin: 0 auto 1.75rem; }
     .titulo-formal { text-align: center; font-size: 16px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; margin: 0 0 1rem; }
     .ementa { text-align: right; font-size: 14px; font-weight: 400; line-height: 1.55; margin: 0 0 1.25rem; max-width: 72%; margin-left: auto; }
     .meta-line { font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink-3); text-align: center; margin: 0 0 1.5rem; }
     .content { max-width: 900px; margin: 0 auto; }
-    .considerando { margin: 0 0 .65rem; text-align: justify; }
-    .preamble { text-align: center; font-style: italic; color: var(--ink-2); margin: 1rem 0 1.5rem; }
+    .preamble { text-align: justify; color: var(--ink); margin: 1rem 0 1.5rem; }
+    .preamble p { margin: 0 0 .75rem; }
+    .texto-simples { margin: 0 0 1rem; }
     .structural { text-align: center; font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 1.5rem 0 1rem; }
     .struct-id { display: block; margin-bottom: .25rem; }
     .article { margin: 0 0 1rem; text-align: justify; }
@@ -153,15 +174,15 @@ export function renderConsolidatedHtml(act: ExportAct): string {
   <p class="brand">Prefeitura Municipal de Franca/SP · Portal de Legislação</p>
   <header class="header">
     <h1 class="titulo-formal">${escapeHtml(tituloFormal)}</h1>
-    <p class="ementa">${escapeHtml(act.ementa)}</p>
-    <p class="meta-line">${escapeHtml(codigo)} · ${escapeHtml(situacao)}${act.orgaoOrigem ? ` · ${escapeHtml(act.orgaoOrigem)}` : ''} · Ato: ${formatDateBr(act.dataAto)} · Pub.: ${formatDateBr(act.dataPublicacao)}</p>
+    ${hasEmentaUnit ? '' : `<p class="ementa">${escapeHtml(act.ementa)}</p>`}
+    <p class="meta-line">${escapeHtml(codigo)} · ${escapeHtml(situacao)}</p>
   </header>
   <main class="content">
-    ${unitsHtml}
+${unitsHtml}
   </main>
-  <footer class="footer">
-    Exportado em ${new Date().toLocaleString('pt-BR')} · LeisMunicipais — Prefeitura de Franca/SP
-  </footer>
+  <footer class="footer">Exportado do SIGLM — ${escapeHtml(codigo)}</footer>
 </body>
 </html>`;
 }
+
+export { unitHtmlToPlainText };

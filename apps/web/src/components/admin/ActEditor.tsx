@@ -2,23 +2,31 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle,
   ArrowDown,
   ArrowUp,
+  AlertCircle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   GripVertical,
+  History,
+  Pencil,
   Plus,
 } from 'lucide-react';
 import { AddUnitDialog } from '@/components/admin/AddUnitDialog';
+import { ActMetadataAttachments } from '@/components/admin/ActMetadataAttachments';
 import { AdminTopbar } from '@/components/admin/AdminShell';
+import { EditUnitDialog } from '@/components/admin/EditUnitDialog';
+import { UnitTextEditor } from '@/components/admin/UnitTextEditor';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
 import { useToast } from '@/components/ui/Toast';
 import {
   addUnit,
+  createActEdition,
   listOrgans,
   publishAct,
   restoreUnitVersion,
@@ -32,19 +40,30 @@ import {
 import { LegislativeEffectsSection } from '@/components/admin/LegislativeEffectsSection';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 import { ACT_TYPE_LABELS, cn, formatFormalTitle, toDateInputValue } from '@/lib/format';
+import {
+  DEFAULT_TEXTO_SIMPLES_FORMAT,
+  type TextAlign,
+  type LetterSpacing,
+  type UnitFormatacao,
+} from '@/lib/rich-text';
 import type { ActDetail, LegislativeEffect, NormativeUnit, UnitType } from '@/lib/types';
 import {
+  type AddContext,
+  assessUnitsHierarchy,
   dragDropBlock,
-  getValidParents,
+  hasChildren,
+  isCollapsedAway,
   moveUnitBlock,
+  NON_EFFECT_SOURCE_TYPES,
   parentLabel,
-  unitIndentClass,
+  resolveActEmenta,
+  unitIndentPx,
   UNIT_TYPE_LABELS,
-  validateUnitsHierarchy,
 } from '@/lib/unit-hierarchy';
 
 interface EditorAct extends ActDetail {
   statusPublicacao?: string;
+  editionOpen?: boolean;
   hierarchyValid?: boolean;
   observacoesInternas?: string | null;
 }
@@ -57,7 +76,26 @@ function unitsPayload(units: NormativeUnit[]): UnitPayload[] {
     texto: u.texto,
     ordem: i,
     parentUnitId: u.parentUnitId ?? null,
+    formatacao: u.formatacao ?? null,
   }));
+}
+
+function fingerprint(
+  assunto: string,
+  dataAto: string,
+  orgaoId: string,
+  units: NormativeUnit[],
+) {
+  return JSON.stringify({
+    assunto,
+    dataAto,
+    orgaoId,
+    units: unitsPayload(units),
+    effects: units.map((u) => ({
+      id: u.id,
+      effects: u.efeitosLegislativos ?? [],
+    })),
+  });
 }
 
 export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
@@ -66,7 +104,6 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const { can } = useAdminAuth();
   const [act, setAct] = useState(initialAct);
   const [units, setUnits] = useState<NormativeUnit[]>(initialAct.units);
-  const [ementa, setEmenta] = useState(initialAct.ementa);
   const [assunto, setAssunto] = useState(initialAct.assunto ?? '');
   const [dataAto, setDataAto] = useState(toDateInputValue(initialAct.dataAto));
   const [orgaoId, setOrgaoId] = useState(initialAct.orgaoOrigemId ?? '');
@@ -74,12 +111,27 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const [saving, setSaving] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addContext, setAddContext] = useState<AddContext>({ mode: 'end' });
+  const [editUnit, setEditUnit] = useState<NormativeUnit | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const savedFingerprint = useRef(
+    fingerprint(
+      initialAct.assunto ?? '',
+      toDateInputValue(initialAct.dataAto),
+      initialAct.orgaoOrigemId ?? '',
+      initialAct.units,
+    ),
+  );
+
+  const editable =
+    act.statusPublicacao !== 'publicado' || Boolean(act.editionOpen);
+  const dirty =
+    fingerprint(assunto, dataAto, orgaoId, units) !== savedFingerprint.current;
 
   useEffect(() => {
     listOrgans(false)
       .then((list) => {
         setOrgans(list);
-        // Mantém órgão inativo já vinculado na lista de opções
         if (
           initialAct.orgaoOrigemId &&
           !list.some((o) => o.id === initialAct.orgaoOrigemId)
@@ -97,6 +149,16 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       .catch(() => undefined);
   }, [initialAct.orgaoOrigem, initialAct.orgaoOrigemId]);
 
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
   const tituloFormalPreview = formatFormalTitle(
     act.tipo,
     act.numero,
@@ -104,41 +166,70 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     dataAto || null,
   );
 
-  const hierarchyValid = useMemo(() => validateUnitsHierarchy(units), [units]);
+  const hierarchy = useMemo(() => assessUnitsHierarchy(units), [units]);
+  const hierarchyValid = hierarchy.structurallySound;
 
   const metaPayload = () => ({
-    ementa,
+    ementa: resolveActEmenta(units, act.ementa) || 'Ementa pendente',
     assunto,
     dataAto: dataAto || undefined,
     orgaoOrigemId: orgaoId || undefined,
   });
 
+  const syncFromAct = (updated: EditorAct) => {
+    setAct(updated);
+    setUnits(updated.units);
+    setAssunto(updated.assunto ?? '');
+    setDataAto(toDateInputValue(updated.dataAto));
+    setOrgaoId(updated.orgaoOrigemId ?? '');
+    savedFingerprint.current = fingerprint(
+      updated.assunto ?? '',
+      toDateInputValue(updated.dataAto),
+      updated.orgaoOrigemId ?? '',
+      updated.units,
+    );
+  };
+
   const moveUnit = (index: number, direction: -1 | 1) => {
+    if (!editable) return;
     const next = moveUnitBlock(units, index, direction);
     if (next !== units) setUnits(next);
   };
 
   const canMove = (index: number, direction: -1 | 1) => {
+    if (!editable) return false;
     const next = moveUnitBlock(units, index, direction);
     return next !== units;
   };
 
-  const onDragStart = (index: number) => setDragIndex(index);
+  const onDragStart = (index: number) => {
+    if (!editable) return;
+    setDragIndex(index);
+  };
 
   const onDrop = (index: number) => {
-    if (dragIndex === null || dragIndex === index) return;
+    if (!editable || dragIndex === null || dragIndex === index) return;
     setUnits(dragDropBlock(units, dragIndex, index));
     setDragIndex(null);
   };
 
   const updateUnitText = (id: string, texto: string) => {
+    if (!editable) return;
     setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, texto } : u)));
   };
 
-  const updateUnitParent = (id: string, parentUnitId: string | null) => {
-    setUnits((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, parentUnitId: parentUnitId || null } : u)),
-    );
+  const toggleCollapsed = (id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const openAddDialog = (ctx: AddContext = { mode: 'end' }) => {
+    setAddContext(ctx);
+    setAddDialogOpen(true);
   };
 
   const updateUnitEffects = (unitId: string, effects: LegislativeEffect[]) => {
@@ -155,6 +246,8 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     identificacao?: string;
     texto?: string;
     parentUnitId?: string | null;
+    afterUnitId?: string | null;
+    formatacao?: UnitFormatacao | null;
   }) => {
     try {
       const updated = await addUnit(act.id, {
@@ -162,13 +255,56 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         identificacao: payload.identificacao,
         texto: payload.texto ?? '',
         parentUnitId: payload.parentUnitId ?? null,
+        afterUnitId: payload.afterUnitId ?? null,
+        formatacao: payload.formatacao ?? null,
       });
-      setAct(updated);
-      setUnits(updated.units);
+      syncFromAct(updated);
       toast('Elemento adicionado', 'ok');
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao adicionar', 'danger');
     }
+  };
+
+  const updateUnitFormatacao = (id: string, patch: Partial<UnitFormatacao>) => {
+    if (!editable) return;
+    setUnits((prev) =>
+      prev.map((u) =>
+        u.id === id
+          ? {
+              ...u,
+              formatacao: {
+                ...(u.formatacao ?? DEFAULT_TEXTO_SIMPLES_FORMAT),
+                ...patch,
+              },
+            }
+          : u,
+      ),
+    );
+  };
+
+  const applyUnitEdit = (patch: {
+    tipoUnidade: UnitType;
+    identificacao: string | null;
+    texto: string;
+    parentUnitId: string | null;
+    formatacao?: UnitFormatacao | null;
+  }) => {
+    if (!editUnit) return;
+    setUnits((prev) =>
+      prev.map((u) =>
+        u.id === editUnit.id
+          ? {
+              ...u,
+              tipoUnidade: patch.tipoUnidade,
+              identificacao: patch.identificacao,
+              texto: patch.texto,
+              parentUnitId: patch.parentUnitId,
+              formatacao: patch.formatacao ?? null,
+            }
+          : u,
+      ),
+    );
+    toast('Elemento atualizado — salve as alterações para gravar', 'ok');
   };
 
   const persistUnits = useCallback(async () => {
@@ -177,8 +313,6 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       (u.efeitosLegislativos ?? []).map((e) => ({ ...e, sourceUnitId: u.id })),
     );
     const withEffects = await saveLegislativeEffects(act.id, allEffects);
-    setAct(withEffects);
-    setUnits(withEffects.units);
     return withEffects;
   }, [act.id, units]);
 
@@ -186,8 +320,9 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setSaving(true);
     try {
       await updateAct(act.id, metaPayload());
-      await persistUnits();
-      toast('Rascunho salvo', 'ok');
+      const updated = await persistUnits();
+      syncFromAct(updated);
+      toast('Alterações salvas', 'ok');
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao salvar', 'danger');
@@ -202,8 +337,11 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       await updateAct(act.id, metaPayload());
       await persistUnits();
       const updated = await submitForReview(act.id);
-      setAct(updated);
-      toast('Enviado para revisão', 'ok');
+      syncFromAct(updated);
+      toast(
+        act.editionOpen ? 'Versão pronta para publicação' : 'Enviado para revisão',
+        'ok',
+      );
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao enviar', 'danger');
@@ -215,14 +353,33 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const handlePublish = async () => {
     setSaving(true);
     try {
-      await updateAct(act.id, metaPayload());
-      await persistUnits();
+      if (editable && dirty) {
+        await updateAct(act.id, metaPayload());
+        await persistUnits();
+      }
       const updated = await publishAct(act.id);
-      setAct(updated);
+      syncFromAct(updated);
       toast('Ato publicado no portal', 'ok');
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao publicar', 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateEdition = async () => {
+    if (dirty && !window.confirm('Há alterações não salvas que serão descartadas. Continuar?')) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await createActEdition(act.id);
+      syncFromAct(updated);
+      toast('Nova versão de trabalho criada — a consulta pública permanece inalterada', 'ok');
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao criar versão', 'danger');
     } finally {
       setSaving(false);
     }
@@ -233,8 +390,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setSaving(true);
     try {
       const updated = await restoreUnitVersion(act.id, unitId, versionId);
-      setAct(updated);
-      setUnits(updated.units);
+      syncFromAct(updated);
       toast('Versão anterior restaurada', 'ok');
       router.refresh();
     } catch (e) {
@@ -244,49 +400,103 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     }
   };
 
+  const confirmLeave = () => {
+    if (dirty && !window.confirm('Há alterações não salvas. Deseja sair mesmo assim?')) {
+      return false;
+    }
+    return true;
+  };
+
   const statusLabel: Record<string, string> = {
     rascunho: 'Rascunho',
     em_revisao: 'Em revisão',
     publicado: 'Publicado',
   };
 
+  const canPublish =
+    can('acts:publish') &&
+    (act.statusPublicacao === 'em_revisao' ||
+      (act.statusPublicacao === 'publicado' && Boolean(act.editionOpen)));
+
   return (
     <>
       <AdminTopbar
         title="Editor de texto estruturado"
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Link href="/admin/atos">
+          <div className="flex flex-wrap items-center gap-2">
+            {dirty && (
+              <Badge variant="warn" className="text-[11px]">
+                Alterações não salvas
+              </Badge>
+            )}
+            <Link
+              href="/admin/atos"
+              onClick={(e) => {
+                if (!confirmLeave()) e.preventDefault();
+              }}
+            >
               <Button variant="ghost" size="sm">
                 Voltar
               </Button>
             </Link>
-            {can('acts:write') && act.statusPublicacao !== 'publicado' && (
+            {can('acts:history') && (
+              <Link href={`/admin/atos/${act.id}/historico`}>
+                <Button variant="ghost" size="sm">
+                  <History className="h-3.5 w-3.5" />
+                  Histórico interno
+                </Button>
+              </Link>
+            )}
+            {can('acts:version') &&
+              act.statusPublicacao === 'publicado' &&
+              !act.editionOpen && (
+                <Button size="sm" onClick={handleCreateEdition} disabled={saving}>
+                  Criar nova versão
+                </Button>
+              )}
+            {can('acts:write') && editable && (
               <Button variant="outlined" size="sm" onClick={handleSave} disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar rascunho'}
+                {saving ? 'Salvando...' : 'Salvar alterações'}
               </Button>
             )}
-            {can('acts:write') && act.statusPublicacao !== 'publicado' && (
-              <Button variant="tonal" size="sm" onClick={handleSubmitReview}>
+            {can('acts:write') && editable && act.statusPublicacao !== 'publicado' && (
+              <Button variant="tonal" size="sm" onClick={handleSubmitReview} disabled={saving}>
                 Enviar para revisão
               </Button>
             )}
-            {can('acts:publish') && act.statusPublicacao === 'em_revisao' && (
-              <Button size="sm" onClick={handlePublish}>
-                Publicar
+            {canPublish && (
+              <Button size="sm" onClick={handlePublish} disabled={saving}>
+                {act.editionOpen ? 'Publicar nova versão' : 'Publicar'}
               </Button>
             )}
           </div>
         }
       />
 
+      {act.statusPublicacao === 'publicado' && !act.editionOpen && (
+        <div className="mx-6 mt-4 rounded-[10px] border border-line bg-surface-2 px-4 py-3 text-[13px] text-ink-2">
+          Este ato está publicado. A consulta pública exibe a versão oficial. Para corrigir
+          conteúdo ou metadados, use <strong>Criar nova versão</strong> — a versão pública não
+          será alterada até a publicação da correção.
+        </div>
+      )}
+      {act.editionOpen && (
+        <div className="mx-6 mt-4 rounded-[10px] border border-brand/30 bg-brand/5 px-4 py-3 text-[13px] text-ink-2">
+          Você está editando uma <strong>versão de trabalho</strong>. A consulta pública continua
+          exibindo a última versão publicada até você publicar esta correção.
+        </div>
+      )}
+
       <div className="grid flex-1 gap-6 overflow-auto p-6 lg:grid-cols-[340px_1fr]">
         <section className="space-y-4 rounded-[14px] border border-line bg-surface p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-section">Metadados</h2>
-            <Badge variant="info">
-              {statusLabel[act.statusPublicacao ?? 'rascunho'] ?? act.statusPublicacao}
-            </Badge>
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="info">
+                {statusLabel[act.statusPublicacao ?? 'rascunho'] ?? act.statusPublicacao}
+              </Badge>
+              {act.editionOpen && <Badge variant="warn">Versão de trabalho</Badge>}
+            </div>
           </div>
           <div className="space-y-3">
             <div>
@@ -296,11 +506,11 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="mb-1 block text-[12px] text-ink-3">Número</label>
-                <Input value={act.numero} readOnly className="font-mono" />
+                <Input value={act.numero} readOnly />
               </div>
               <div>
                 <label className="mb-1 block text-[12px] text-ink-3">Ano</label>
-                <Input value={act.ano} readOnly className="font-mono" />
+                <Input value={act.ano} readOnly />
               </div>
             </div>
             <div>
@@ -309,7 +519,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 type="date"
                 value={dataAto}
                 onChange={(e) => setDataAto(e.target.value)}
-                className="font-mono"
+                disabled={!editable}
               />
               <p className="mt-1 text-[11px] text-ink-4">
                 Gera o título formal automaticamente. O ano pode ser preenchido a partir desta data.
@@ -321,21 +531,25 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 {tituloFormalPreview}
               </p>
             </div>
-            <div>
-              <label className="mb-1 block text-[12px] text-ink-3">Ementa</label>
-              <textarea
-                value={ementa}
-                onChange={(e) => setEmenta(e.target.value)}
-                className="min-h-[80px] w-full rounded-[10px] border border-line px-3.5 py-2 text-[13.5px] focus-ring"
-              />
+            <div className="rounded-[10px] border border-dashed border-line px-3 py-2 text-[12.5px] text-ink-3">
+              A ementa oficial é cadastrada no Texto Estruturado (grupo Texto → Ementa), não nos
+              metadados.
             </div>
             <div>
               <label className="mb-1 block text-[12px] text-ink-3">Assunto</label>
-              <Input value={assunto} onChange={(e) => setAssunto(e.target.value)} />
+              <Input
+                value={assunto}
+                onChange={(e) => setAssunto(e.target.value)}
+                disabled={!editable}
+              />
             </div>
             <div>
               <label className="mb-1 block text-[12px] text-ink-3">Órgão de origem</label>
-              <Select value={orgaoId} onChange={(e) => setOrgaoId(e.target.value)}>
+              <Select
+                value={orgaoId}
+                onChange={(e) => setOrgaoId(e.target.value)}
+                disabled={!editable}
+              >
                 <option value="">Selecione…</option>
                 {organs
                   .filter((o) => o.ativo || o.id === orgaoId)
@@ -347,55 +561,99 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                   ))}
               </Select>
             </div>
+            <ActMetadataAttachments actId={act.id} editable={editable && can('acts:write')} />
           </div>
         </section>
 
         <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-section">Texto estruturado</h2>
             <div
               className={cn(
                 'flex items-center gap-2 text-[12.5px] font-semibold',
-                hierarchyValid ? 'text-ok' : 'text-warn',
+                !hierarchyValid
+                  ? 'text-danger'
+                  : hierarchy.hasNonstandardLinks
+                    ? 'text-warn'
+                    : 'text-ok',
               )}
             >
-              {hierarchyValid ? (
-                <CheckCircle2 className="h-4 w-4" />
-              ) : (
+              {!hierarchyValid ? (
                 <AlertCircle className="h-4 w-4" />
+              ) : hierarchy.hasNonstandardLinks ? (
+                <AlertCircle className="h-4 w-4" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
               )}
-              {hierarchyValid ? 'Hierarquia válida' : 'Revise ordem e vínculos dos dispositivos'}
+              {!hierarchyValid
+                ? 'Estrutura inconsistente — revise vínculos'
+                : hierarchy.hasNonstandardLinks
+                  ? 'Estrutura atípica permitida (ato fiel)'
+                  : 'Hierarquia íntegra'}
             </div>
           </div>
+          {hierarchy.warnings.length > 0 && (
+            <p className="mb-3 text-[12px] text-ink-3">{hierarchy.warnings[0]}</p>
+          )}
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {units.map((unit, index) => {
-              const validParents = getValidParents(unit.tipoUnidade, units).filter(
-                (p) => p.id !== unit.id,
-              );
+              if (isCollapsedAway(unit, units, collapsed)) return null;
+              const childCount = units.filter((u) => u.parentUnitId === unit.id).length;
+              const canToggle = hasChildren(unit.id, units);
+              const isOpen = !collapsed.has(unit.id);
+              const indent = unitIndentPx(unit, units);
 
               return (
                 <div
                   key={unit.id}
-                  draggable
+                  draggable={editable}
                   onDragStart={() => onDragStart(index)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => onDrop(index)}
+                  style={{ marginLeft: indent }}
                   className={cn(
                     'flex items-start gap-2 rounded-[10px] border border-line-2 bg-surface-2 p-3 transition',
-                    unitIndentClass(unit.tipoUnidade),
                     dragIndex === index && 'opacity-50',
                   )}
                 >
+                  {canToggle ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleCollapsed(unit.id)}
+                      className="mt-0.5 shrink-0 rounded p-0.5 text-ink-4 hover:bg-surface hover:text-brand"
+                      aria-label={isOpen ? 'Recolher subordinados' : 'Expandir subordinados'}
+                      title={isOpen ? 'Recolher' : 'Expandir'}
+                    >
+                      {isOpen ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="mt-0.5 inline-block w-5 shrink-0" />
+                  )}
                   <GripVertical className="mt-1 h-4 w-4 shrink-0 cursor-grab text-ink-4" />
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[12px] font-semibold text-brand">
+                      <span className="text-[12px] font-semibold text-brand">
                         {unit.identificacao ?? UNIT_TYPE_LABELS[unit.tipoUnidade]}
                       </span>
                       <Badge variant="neutral" className="text-[10px]">
                         {UNIT_TYPE_LABELS[unit.tipoUnidade]}
                       </Badge>
+                      {editable && can('acts:write') && (
+                        <button
+                          type="button"
+                          onClick={() => setEditUnit(unit)}
+                          className="rounded p-1 text-ink-4 hover:bg-surface hover:text-brand"
+                          aria-label="Editar identificação, tipo e vínculo"
+                          title="Editar identificação, tipo e vínculo"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       <Badge
                         variant={
                           unit.status === 'vigente'
@@ -412,45 +670,90 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                           ↳ {parentLabel(units, unit.parentUnitId)}
                         </span>
                       )}
+                      {canToggle && !isOpen && (
+                        <span className="text-[11px] text-ink-4">
+                          ({childCount} subordinado{childCount === 1 ? '' : 's'} oculto
+                          {childCount === 1 ? '' : 's'})
+                        </span>
+                      )}
                     </div>
 
-                    {can('acts:write') && validParents.length > 0 && (
-                      <div>
-                        <label className="mb-1 block text-[11px] text-ink-4">Vincular a</label>
-                        <Select
-                          value={unit.parentUnitId ?? ''}
-                          onChange={(e) =>
-                            updateUnitParent(unit.id, e.target.value || null)
-                          }
-                          className="text-[12px]"
-                        >
-                          <option value="">Nenhum (nível superior)</option>
-                          {validParents.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.identificacao ?? UNIT_TYPE_LABELS[p.tipoUnidade]} (
-                              {UNIT_TYPE_LABELS[p.tipoUnidade]})
-                            </option>
+                    <UnitTextEditor
+                      value={unit.texto}
+                      onChange={(html) => updateUnitText(unit.id, html)}
+                      disabled={!editable}
+                      rows={unit.tipoUnidade === 'artigo' || unit.tipoUnidade === 'preambulo' ? 3 : 2}
+                    />
+                    {unit.tipoUnidade === 'texto_simples' && editable && (
+                      <div className="space-y-2 rounded-[8px] border border-line bg-surface px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-4">
+                          Formatação
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Select
+                            value={unit.formatacao?.align ?? 'center'}
+                            onChange={(e) =>
+                              updateUnitFormatacao(unit.id, {
+                                align: e.target.value as TextAlign,
+                              })
+                            }
+                            className="text-[12px]"
+                          >
+                            <option value="left">Esquerda</option>
+                            <option value="center">Centralizado</option>
+                            <option value="right">Direita</option>
+                            <option value="justify">Justificado</option>
+                          </Select>
+                          <Select
+                            value={unit.formatacao?.letterSpacing ?? 'normal'}
+                            onChange={(e) =>
+                              updateUnitFormatacao(unit.id, {
+                                letterSpacing: e.target.value as LetterSpacing,
+                              })
+                            }
+                            className="text-[12px]"
+                          >
+                            <option value="normal">Espaçamento normal</option>
+                            <option value="expanded">Espaçamento expandido</option>
+                          </Select>
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                          {(
+                            [
+                              ['bold', 'Negrito'],
+                              ['italic', 'Itálico'],
+                              ['underline', 'Sublinhado'],
+                            ] as const
+                          ).map(([key, label]) => (
+                            <label
+                              key={key}
+                              className="inline-flex items-center gap-1.5 text-[12px] text-ink-2"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={Boolean(unit.formatacao?.[key])}
+                                onChange={(e) =>
+                                  updateUnitFormatacao(unit.id, { [key]: e.target.checked })
+                                }
+                              />
+                              {label}
+                            </label>
                           ))}
-                        </Select>
+                        </div>
                       </div>
                     )}
-
-                    <textarea
-                      value={unit.texto}
-                      onChange={(e) => updateUnitText(unit.id, e.target.value)}
-                      rows={unit.tipoUnidade === 'artigo' ? 3 : 2}
-                      className="w-full rounded-[8px] border border-line bg-surface px-3 py-2 text-[13px] focus-ring"
-                    />
-                    {can('acts:write') && act.statusPublicacao !== 'publicado' && (
-                      <LegislativeEffectsSection
-                        unitId={unit.id}
-                        actId={act.id}
-                        effects={unit.efeitosLegislativos ?? []}
-                        onChange={(effects) => updateUnitEffects(unit.id, effects)}
-                        redacaoChildUnits={childUnitsForRedacao(unit.id)}
-                      />
-                    )}
-                    {can('acts:write') && unit.versoes.length > 1 && (
+                    {can('acts:write') &&
+                      editable &&
+                      !NON_EFFECT_SOURCE_TYPES.includes(unit.tipoUnidade) && (
+                        <LegislativeEffectsSection
+                          unitId={unit.id}
+                          actId={act.id}
+                          effects={unit.efeitosLegislativos ?? []}
+                          onChange={(effects) => updateUnitEffects(unit.id, effects)}
+                          redacaoChildUnits={childUnitsForRedacao(unit.id)}
+                        />
+                      )}
+                    {can('acts:write') && editable && unit.versoes.length > 1 && (
                       <Select
                         defaultValue=""
                         onChange={(e) => {
@@ -471,6 +774,30 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                         ))}
                       </Select>
                     )}
+                    {can('acts:write') && editable && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openAddDialog({ mode: 'inside', anchorId: unit.id })
+                          }
+                          className="inline-flex items-center gap-1 rounded-[8px] border border-line bg-surface px-2 py-1 text-[11px] font-medium text-brand hover:bg-brand-soft"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Dentro
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openAddDialog({ mode: 'after', anchorId: unit.id })
+                          }
+                          className="inline-flex items-center gap-1 rounded-[8px] border border-line bg-surface px-2 py-1 text-[11px] font-medium text-ink-2 hover:bg-surface-2"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Após
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="flex shrink-0 flex-col gap-0.5">
                     <button
@@ -478,7 +805,8 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                       onClick={() => moveUnit(index, -1)}
                       disabled={!canMove(index, -1)}
                       className="touch-target rounded p-1.5 text-ink-4 hover:bg-surface hover:text-brand disabled:opacity-30"
-                      aria-label="Mover para cima"
+                      aria-label="Mover bloco para cima"
+                      title="Move o elemento e toda a subárvore"
                     >
                       <ArrowUp className="h-3.5 w-3.5" />
                     </button>
@@ -487,7 +815,8 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                       onClick={() => moveUnit(index, 1)}
                       disabled={!canMove(index, 1)}
                       className="touch-target rounded p-1.5 text-ink-4 hover:bg-surface hover:text-brand disabled:opacity-30"
-                      aria-label="Mover para baixo"
+                      aria-label="Mover bloco para baixo"
+                      title="Move o elemento e toda a subárvore"
                     >
                       <ArrowDown className="h-3.5 w-3.5" />
                     </button>
@@ -497,12 +826,12 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
             })}
           </div>
 
-          {can('acts:write') && act.statusPublicacao !== 'publicado' && (
+          {can('acts:write') && editable && (
             <Button
               variant="tonal"
               size="sm"
               className="mt-4"
-              onClick={() => setAddDialogOpen(true)}
+              onClick={() => openAddDialog({ mode: 'end' })}
             >
               <Plus className="h-4 w-4" />
               Adicionar elemento
@@ -513,9 +842,17 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
 
       <AddUnitDialog
         open={addDialogOpen}
-        units={units}
         onClose={() => setAddDialogOpen(false)}
+        units={units}
+        context={addContext}
         onConfirm={handleAddUnit}
+      />
+      <EditUnitDialog
+        open={Boolean(editUnit)}
+        unit={editUnit}
+        units={units}
+        onClose={() => setEditUnit(null)}
+        onSave={applyUnitEdit}
       />
     </>
   );
