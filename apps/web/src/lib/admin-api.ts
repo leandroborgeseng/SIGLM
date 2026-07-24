@@ -828,4 +828,49 @@ export function startActStructuring(id: string, token?: string) {
   return adminFetch<ActDetail>(`/admin/acts/${id}/start-structuring`, { method: 'POST' }, token);
 }
 
+/** Baixa backup completo (banco + uploads) — apenas admin_geral. */
+export async function downloadSystemBackup(): Promise<void> {
+  const API_URL = getApiBaseUrl();
+  const res = await authorizedFetch(`${API_URL}/admin/system/backup`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = Array.isArray(err.message) ? err.message.join(', ') : err.message;
+    throw new Error(msg ?? 'Erro ao gerar backup');
+  }
+  const blob = await res.blob();
+  const disp = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?([^"]+)"?/i.exec(disp);
+  const filename = match?.[1] ?? `siglm-backup-${new Date().toISOString()}.tar.gz`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Restaura backup completo (substitui dados atuais) — apenas admin_geral. */
+export async function restoreSystemBackup(file: File) {
+  const API_URL = getApiBaseUrl();
+  const form = new FormData();
+  form.append('file', file);
+  const res = await authorizedFetch(`${API_URL}/admin/system/restore`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = Array.isArray(err.message) ? err.message.join(', ') : err.message;
+    throw new Error(msg ?? 'Erro ao restaurar backup');
+  }
+  return res.json() as Promise<{
+    ok: boolean;
+    message: string;
+    restoredFrom: string;
+    counts: Record<string, number>;
+  }>;
+}
+
 export type { AdminListResponse };

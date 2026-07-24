@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, Upload } from 'lucide-react';
+import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 import { AdminTopbar } from '@/components/admin/AdminShell';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -11,12 +13,14 @@ import {
   createPublicationMedium,
   createSignatory,
   createUser,
+  downloadSystemBackup,
   listOrgans,
   listPermissions,
   listPublicationMedia,
   listRoles,
   listSignatories,
   listUsers,
+  restoreSystemBackup,
   setRolePermissions,
   updateOrgan,
   updatePublicationMedium,
@@ -30,20 +34,28 @@ import {
 } from '@/lib/admin-api';
 import { cn } from '@/lib/format';
 
-type Tab = 'usuarios' | 'orgaos' | 'meios' | 'signatarios' | 'permissoes';
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'usuarios', label: 'Usuários' },
-  { id: 'orgaos', label: 'Órgãos de Origem' },
-  { id: 'meios', label: 'Meios de publicação' },
-  { id: 'signatarios', label: 'Signatários' },
-  { id: 'permissoes', label: 'Permissões' },
-];
+type Tab = 'usuarios' | 'orgaos' | 'meios' | 'signatarios' | 'permissoes' | 'backup';
 
 export function AdministrationPanel() {
   const { toast } = useToast();
+  const { user, can } = useAdminAuth();
+  const isSystemAdmin = user?.role === 'admin_geral' && can('users:manage');
   const [tab, setTab] = useState<Tab>('usuarios');
   const [loading, setLoading] = useState(true);
+
+  const tabs = useMemo(() => {
+    const base: { id: Tab; label: string }[] = [
+      { id: 'usuarios', label: 'Usuários' },
+      { id: 'orgaos', label: 'Órgãos de Origem' },
+      { id: 'meios', label: 'Meios de publicação' },
+      { id: 'signatarios', label: 'Signatários' },
+      { id: 'permissoes', label: 'Permissões' },
+    ];
+    if (isSystemAdmin) {
+      base.push({ id: 'backup', label: 'Backup e migração' });
+    }
+    return base;
+  }, [isSystemAdmin]);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [organs, setOrgans] = useState<OriginOrg[]>([]);
@@ -86,7 +98,7 @@ export function AdministrationPanel() {
 
       <div className="border-b border-line bg-surface px-4 sm:px-6">
         <div className="flex gap-1 overflow-x-auto">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -105,7 +117,9 @@ export function AdministrationPanel() {
       </div>
 
       <div className="flex-1 overflow-auto p-4 sm:p-6">
-        {loading ? (
+        {tab === 'backup' && isSystemAdmin ? (
+          <BackupTab />
+        ) : loading ? (
           <p className="text-[14px] text-ink-3">Carregando…</p>
         ) : tab === 'usuarios' ? (
           <UsersTab users={users} roles={roles} onChanged={reload} />
@@ -119,6 +133,143 @@ export function AdministrationPanel() {
           <PermissionsTab roles={roles} permissions={permissions} onChanged={reload} />
         )}
       </div>
+    </div>
+  );
+}
+
+function BackupTab() {
+  const { toast } = useToast();
+  const [exporting, setExporting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+
+  const onExport = async () => {
+    setExporting(true);
+    try {
+      await downloadSystemBackup();
+      toast('Backup gerado e download iniciado', 'ok');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erro ao exportar backup', 'danger');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const onRestore = async (file: File | null) => {
+    if (!file) return;
+    if (confirmText.trim().toUpperCase() !== 'RESTAURAR') {
+      toast('Digite RESTAURAR para confirmar a importação', 'warn');
+      return;
+    }
+    const ok = window.confirm(
+      'Atenção: a restauração SUBSTITUI todo o banco de dados e os arquivos enviados deste servidor pelo conteúdo do backup. Esta ação não pode ser desfeita. Continuar?',
+    );
+    if (!ok) return;
+
+    setRestoring(true);
+    try {
+      const result = await restoreSystemBackup(file);
+      toast(result.message || 'Backup restaurado', 'ok');
+      setConfirmText('');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erro ao restaurar backup', 'danger');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <div>
+        <h2 className="text-[18px] font-semibold text-ink">Backup e migração</h2>
+        <p className="mt-2 text-[14px] leading-relaxed text-ink-2">
+          Exporte o banco de dados e os arquivos (PDFs/anexos) deste servidor para migrar para
+          outro ambiente (por exemplo, Railway → Coolify). Variáveis de ambiente (JWT, senhas do
+          Postgres, URLs) não entram no arquivo — configure-as no painel do Coolify.
+        </p>
+        <p className="mt-2 text-[13px] text-ink-3">
+          Disponível apenas para o perfil <strong>Administrador geral</strong>.
+        </p>
+      </div>
+
+      <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <Download className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[15px] font-semibold text-ink">Exportar backup</h3>
+            <p className="mt-1 text-[13.5px] text-ink-3">
+              Gera um arquivo <code className="font-mono text-[12px]">.tar.gz</code> com dados do
+              sistema (usuários, órgãos, atos, anexos, etc.) e a pasta de uploads.
+            </p>
+            <Button
+              className="mt-4"
+              size="sm"
+              onClick={() => void onExport()}
+              disabled={exporting || restoring}
+            >
+              {exporting ? 'Gerando backup…' : 'Baixar backup completo'}
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-[14px] border border-danger/30 bg-danger/5 p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <Upload className="mt-0.5 h-5 w-5 shrink-0 text-danger" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[15px] font-semibold text-ink">Importar / restaurar backup</h3>
+            <p className="mt-1 text-[13.5px] text-ink-3">
+              Use no servidor de destino (Coolify) após o deploy e as migrations. A operação
+              apaga os dados atuais deste ambiente e carrega o conteúdo do arquivo.
+            </p>
+            <ol className="mt-3 list-decimal space-y-1 pl-5 text-[13px] text-ink-2">
+              <li>Faça o deploy do SIGLM no Coolify e rode as migrations.</li>
+              <li>Exporte o backup no Railway (botão acima).</li>
+              <li>Neste servidor Coolify, selecione o arquivo e confirme digitando RESTAURAR.</li>
+            </ol>
+            <label className="mt-4 block text-[12px] font-medium text-ink-2">
+              Digite <Badge variant="danger">RESTAURAR</Badge> para habilitar a importação
+            </label>
+            <Input
+              className="mt-1.5 max-w-xs font-mono uppercase"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="RESTAURAR"
+              disabled={restoring || exporting}
+              autoComplete="off"
+            />
+            <div className="mt-4">
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={
+                  restoring || exporting || confirmText.trim().toUpperCase() !== 'RESTAURAR'
+                }
+                onClick={() => {
+                  const input = document.getElementById(
+                    'siglm-restore-file',
+                  ) as HTMLInputElement | null;
+                  input?.click();
+                }}
+              >
+                {restoring ? 'Restaurando…' : 'Selecionar arquivo e restaurar'}
+              </Button>
+              <input
+                id="siglm-restore-file"
+                type="file"
+                accept=".tar.gz,application/gzip,application/x-gzip,application/x-tar"
+                className="hidden"
+                disabled={restoring || exporting}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  e.target.value = '';
+                  void onRestore(file);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
