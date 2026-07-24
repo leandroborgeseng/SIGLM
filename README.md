@@ -48,8 +48,7 @@ A API sobe em `http://localhost:3001/api`. O frontend em `http://localhost:3000`
 | http://localhost:3000/legislacao/lei-complementar/2024/312 | Página do ato (LC 312/2024) |
 | http://localhost:3000/admin/login | Login administrativo |
 | http://localhost:3000/admin/atos | Listagem de atos (KPIs + tabela) |
-| http://localhost:3000/admin/importar | Importação e conferência |
-| http://localhost:3000/admin/ocr | OCR de PDF digitalizado |
+| http://localhost:3000/admin/importar | Importação e conferência (OCR automático em PDF digitalizado) |
 | http://localhost:3000/admin/consolidar | Consolidação normativa |
 
 ### Endpoints de verificação

@@ -255,7 +255,7 @@ export function ImportPanel() {
       }
       if (data.needsOcrReview) {
         toast('PDF digitalizado — revise o OCR antes de continuar', 'warn');
-        router.push(`/admin/ocr?importId=${data.id}`);
+        router.push(`/admin/importar?id=${data.id}&revisaoOcr=1`);
         return;
       }
       toast('Arquivo processado — confira a estrutura', 'ok');
@@ -420,8 +420,8 @@ export function ImportPanel() {
               <strong>PDF digitalizado detectado.</strong> Revise o texto reconhecido por OCR antes
               da conferência.
             </div>
-            <Link href={`/admin/ocr?importId=${imp.id}`}>
-              <Button>Ir para revisão OCR →</Button>
+            <Link href={`/admin/importar?id=${imp.id}&revisaoOcr=1`}>
+              <Button>Revisar texto do OCR →</Button>
             </Link>
           </div>
         )}

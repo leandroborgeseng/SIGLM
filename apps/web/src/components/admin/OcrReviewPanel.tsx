@@ -17,7 +17,8 @@ import {
 export function OcrReviewPanel() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const importId = searchParams.get('importId');
+  // Aceita id da rota Importar (?id=&revisaoOcr=1) ou o parâmetro legado importId.
+  const importId = searchParams.get('id') ?? searchParams.get('importId');
   const { toast } = useToast();
 
   const [imp, setImp] = useState<ImportDetail | null>(null);
@@ -105,17 +106,35 @@ export function OcrReviewPanel() {
 
   return (
     <>
-      <AdminTopbar title="OCR — PDF digitalizado" />
+      <AdminTopbar
+        title="Importar — revisão OCR"
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              router.push(importId ? `/admin/importar?id=${importId}` : '/admin/importar')
+            }
+          >
+            Voltar à conferência
+          </Button>
+        }
+      />
 
       <div className="flex-1 overflow-auto p-6">
         <div className="mb-6 rounded-[10px] border border-warn-bd bg-warn-bg px-4 py-3 text-[13.5px] text-warn">
-          <strong>Revisão humana obrigatória</strong> — textos reconhecidos por OCR devem ser revisados antes da publicação.
+          <strong>Revisão humana obrigatória</strong> — textos reconhecidos por OCR devem ser
+          revisados antes da publicação. O OCR é aplicado automaticamente na importação estruturada
+          quando o PDF não possui texto pesquisável.
         </div>
 
         {!importId && (
           <p className="text-[14px] text-ink-3">
             Nenhuma importação selecionada. Faça upload de um PDF digitalizado em{' '}
-            <a href="/admin/importar" className="text-brand hover:underline">Importar</a>.
+            <a href="/admin/importar" className="text-brand hover:underline">
+              Importar
+            </a>
+            .
           </p>
         )}
 
