@@ -7,6 +7,7 @@ import {
 import {
   ActSituacao,
   ActType,
+  EditorialStage,
   Prisma,
   PublicationStatus,
   UnitStatus,
@@ -14,8 +15,22 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConsolidationService } from '../consolidation/consolidation.service';
-import { AddUnitDto, CreateActDto, DeleteUnitDto, SaveLegislativeEffectsDto, SaveUnitsDto, UpdateActDto } from './normative-acts.dto';
-import { buildActSlug, formatActCode, formatFormalTitle, parseSlug } from './normative-acts.utils';
+import {
+  ActSignatoryInputDto,
+  AddUnitDto,
+  CreateActDto,
+  DeleteUnitDto,
+  SaveLegislativeEffectsDto,
+  SaveUnitsDto,
+  UpdateActDto,
+} from './normative-acts.dto';
+import {
+  buildActSlug,
+  formatActCode,
+  formatFormalTitle,
+  parseSlug,
+  resolveTituloPrefixo,
+} from './normative-acts.utils';
 import {
   buildActSnapshot,
   diffSnapshots,
@@ -35,6 +50,14 @@ export interface SearchActsQuery {
   q?: string;
   tipo?: ActType;
   situacao?: ActSituacao;
+  /** Filtro admin: status de publicação (rascunho/em_revisao/publicado). */
+  statusPublicacao?: PublicationStatus;
+  /** Filtro admin: estágio editorial / de estruturação. */
+  etapaEditorial?: EditorialStage;
+  /** Busca parcial no código/slug/número (coluna Norma). */
+  norma?: string;
+  /** Busca parcial na ementa. */
+  ementa?: string;
   ano?: number;
   numero?: number;
   assunto?: string;
@@ -287,6 +310,9 @@ export class NormativeActsService {
       where: { slug, statusPublicacao: PublicationStatus.publicado },
       include: {
         orgao: true,
+        meioPublicacao: true,
+        originOrgs: { orderBy: { ordem: 'asc' }, include: { orgao: true } },
+        signatories: { orderBy: { ordem: 'asc' } },
         units: { orderBy: { ordem: 'asc' } },
         attachments: true,
         changesAsAlterada: {
@@ -311,6 +337,13 @@ export class NormativeActsService {
     let publicSituacao = act.situacao;
     let publicOrgao = act.orgao?.nome ?? act.orgaoOrigem;
     let publicAttachments = act.attachments;
+    let publicMeio = act.meioPublicacao;
+    let publicAtoConjunto = act.atoConjunto;
+    let publicPrefixoModo = act.prefixoTituloModo;
+    let publicPrefixo = act.prefixoTitulo;
+    let publicOrgaos = act.originOrgs;
+    let publicSignatarios = act.signatories;
+    let publicDataPublicacao = act.dataPublicacao;
 
     if (act.editionOpen) {
       const currentRev = await this.prisma.actPublicRevision.findFirst({
@@ -330,6 +363,7 @@ export class NormativeActsService {
           status: u.status as UnitStatus,
           origemActId: act.id,
           alteradoPorActId: null,
+          dataAlteracao: null,
           createdAt: act.createdAt,
           updatedAt: act.updatedAt,
         })) as typeof act.units;
@@ -338,6 +372,23 @@ export class NormativeActsService {
         publicDataAto = snap.metadata.dataAto ? new Date(snap.metadata.dataAto) : act.dataAto;
         publicSituacao = (snap.metadata.situacao as ActSituacao) ?? act.situacao;
         publicOrgao = snap.metadata.orgaoOrigem ?? publicOrgao;
+        publicAtoConjunto = snap.metadata.atoConjunto ?? publicAtoConjunto;
+        publicPrefixoModo = snap.metadata.prefixoTituloModo ?? publicPrefixoModo;
+        publicPrefixo = snap.metadata.prefixoTitulo ?? publicPrefixo;
+        publicDataPublicacao = snap.metadata.dataPublicacao
+          ? new Date(snap.metadata.dataPublicacao)
+          : publicDataPublicacao;
+        if (snap.metadata.signatories) {
+          publicSignatarios = snap.metadata.signatories.map((s, i) => ({
+            id: `snap-sig-${i}`,
+            actId: act.id,
+            signatoryId: s.signatoryId,
+            nome: s.nome,
+            cargo: s.cargo,
+            ordem: s.ordem,
+            createdAt: act.createdAt,
+          })) as typeof act.signatories;
+        }
       }
       if (snap?.attachments?.length) {
         publicAttachments = snap.attachments.map((a) => ({
@@ -420,26 +471,73 @@ export class NormativeActsService {
     const originalFile =
       attachmentPayload.find((a) => a.tipo === 'pdf_original' || a.tipo === 'digitalizado') ??
       null;
+    const arquivoPublicacao =
+      attachmentPayload.find((a) => a.tipo === 'arquivo_publicacao') ?? null;
     const anexosTopo = attachmentPayload.filter((a) => a.tipo === 'anexo_topo');
     const anexosFinal = attachmentPayload.filter((a) => a.tipo === 'anexo_final');
+
+    const orgaosOrigem = publicOrgaos.map((l) => ({
+      id: l.orgao.id,
+      nome: l.orgao.nome,
+      sigla: l.orgao.sigla,
+      ordem: l.ordem,
+    }));
+    if (!orgaosOrigem.length && (act.orgao || publicOrgao)) {
+      orgaosOrigem.push({
+        id: act.orgao?.id ?? act.orgaoOrigemId ?? '',
+        nome: act.orgao?.nome ?? publicOrgao ?? '',
+        sigla: act.orgao?.sigla ?? null,
+        ordem: 0,
+      });
+    }
+    const signatarios = publicSignatarios.map((s) => ({
+      id: s.id,
+      signatoryId: s.signatoryId,
+      nome: s.nome,
+      cargo: s.cargo,
+      ordem: s.ordem,
+    }));
+    const prefixoResolvido = resolveTituloPrefixo(
+      publicPrefixoModo,
+      publicPrefixo,
+      orgaosOrigem,
+    );
 
     return {
       ...act,
       ementa: publicEmenta,
       assunto: publicAssunto,
       dataAto: publicDataAto,
+      dataPublicacao: publicDataPublicacao,
       situacao: publicSituacao,
-      orgaoOrigem: publicOrgao,
+      orgaoOrigem: orgaosOrigem.map((o) => o.nome).join('; ') || publicOrgao,
+      meioPublicacao: publicMeio
+        ? { id: publicMeio.id, nome: publicMeio.nome }
+        : null,
+      orgaosOrigem,
+      signatarios,
+      atoConjunto: publicAtoConjunto,
+      prefixoTituloModo: publicPrefixoModo,
+      prefixoTitulo: publicPrefixo,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
-      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, publicDataAto),
+      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, publicDataAto, {
+        atoConjunto: publicAtoConjunto,
+        prefixo: prefixoResolvido,
+      }),
       units: unitsWithNotes,
       history,
       attachments: attachmentPayload,
       arquivoOriginal: originalFile,
+      arquivoPublicacao,
       anexosTopo,
       anexosFinal,
+      etapaEditorial: act.etapaEditorial,
+      /** Há texto estruturado na versão pública (não apenas arquivo original). */
+      textoEstruturadoDisponivel: unitsWithNotes.length > 0,
       changesAsAlterada: undefined,
       orgao: undefined,
+      originOrgs: undefined,
+      signatories: undefined,
       editionOpen: undefined,
     };
   }
@@ -449,16 +547,66 @@ export class NormativeActsService {
     const limit = Math.min(query.limit ?? 20, 50);
     const skip = (page - 1) * limit;
 
-    const where: Prisma.NormativeActWhereInput = {
-      ...(query.tipo && { tipo: query.tipo }),
-      ...(query.situacao && { situacao: query.situacao }),
-      ...(query.q?.trim() && {
+    const and: Prisma.NormativeActWhereInput[] = [];
+
+    if (query.tipo) and.push({ tipo: query.tipo });
+    if (query.situacao) and.push({ situacao: query.situacao });
+    if (query.statusPublicacao) and.push({ statusPublicacao: query.statusPublicacao });
+    if (query.etapaEditorial) and.push({ etapaEditorial: query.etapaEditorial });
+
+    const ementaTerm = query.ementa?.trim() || null;
+    if (ementaTerm) {
+      and.push({ ementa: { contains: ementaTerm, mode: 'insensitive' } });
+    }
+
+    const normaTerm = query.norma?.trim() || null;
+    if (normaTerm) {
+      const digits = normaTerm.replace(/\D/g, '');
+      const num = digits ? Number(digits) : NaN;
+      const yearMatch = normaTerm.match(/(19|20)\d{2}/);
+      const year = yearMatch ? Number(yearMatch[0]) : null;
+      const slugish = normaTerm.toLowerCase().replace(/\s+/g, '/').replace(/n[ºo°.]?/gi, '');
+      and.push({
         OR: [
-          { ementa: { contains: query.q.trim(), mode: 'insensitive' } },
-          { assunto: { contains: query.q.trim(), mode: 'insensitive' } },
+          { slug: { contains: slugish, mode: 'insensitive' } },
+          { slug: { contains: normaTerm.replace(/\s+/g, '-'), mode: 'insensitive' } },
+          { assunto: { contains: normaTerm, mode: 'insensitive' } },
+          ...(!Number.isNaN(num) && num > 0 ? [{ numero: num }] : []),
+          ...(year ? [{ ano: year }] : []),
         ],
-      }),
-    };
+      });
+    }
+
+    if (query.q?.trim() && !normaTerm && !ementaTerm) {
+      const q = query.q.trim();
+      and.push({
+        OR: [
+          { ementa: { contains: q, mode: 'insensitive' } },
+          { assunto: { contains: q, mode: 'insensitive' } },
+          { slug: { contains: q.replace(/\s+/g, '/'), mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (query.publicadoDe || query.publicadoAte) {
+      const de = query.publicadoDe ? new Date(query.publicadoDe) : undefined;
+      let ate = query.publicadoAte ? new Date(query.publicadoAte) : undefined;
+      if (ate && !Number.isNaN(ate.getTime())) {
+        // Inclui o dia final completo (UTC).
+        ate = new Date(
+          Date.UTC(ate.getUTCFullYear(), ate.getUTCMonth(), ate.getUTCDate(), 23, 59, 59, 999),
+        );
+      }
+      and.push({
+        dataPublicacao: {
+          ...(de && !Number.isNaN(de.getTime()) ? { gte: de } : {}),
+          ...(ate && !Number.isNaN(ate.getTime()) ? { lte: ate } : {}),
+          not: null,
+        },
+      });
+    }
+
+    const where: Prisma.NormativeActWhereInput = and.length ? { AND: and } : {};
 
     const [items, total, kpis] = await Promise.all([
       this.prisma.normativeAct.findMany({
@@ -507,6 +655,9 @@ export class NormativeActsService {
       where: { id },
       include: {
         orgao: true,
+        meioPublicacao: true,
+        originOrgs: { orderBy: { ordem: 'asc' }, include: { orgao: true } },
+        signatories: { orderBy: { ordem: 'asc' } },
         units: { orderBy: { ordem: 'asc' } },
         attachments: true,
       },
@@ -531,33 +682,72 @@ export class NormativeActsService {
       return acc;
     }, {});
 
+    const mappedAttachments = act.attachments.map((a) => ({
+      id: a.id,
+      tipo: a.tipo,
+      url: a.url,
+      nome: a.nome,
+      titulo: a.titulo ?? a.nome,
+      href: a.href,
+      ordem: a.ordem,
+      ativo: a.ativo,
+      tamanho: a.tamanho,
+      criadoEm: a.criadoEm.toISOString(),
+      substituidoEm: a.substituidoEm?.toISOString() ?? null,
+      downloadUrl: a.url ? `/public/attachments/${a.id}/file` : null,
+      adminDownloadUrl: a.url ? `/admin/acts/${act.id}/attachments/${a.id}/file` : null,
+      directLink: a.url ? `/public/attachments/${a.id}/file` : a.href,
+    }));
+
+    const orgaosOrigem = act.originOrgs.map((l) => ({
+      id: l.orgao.id,
+      nome: l.orgao.nome,
+      sigla: l.orgao.sigla,
+      ordem: l.ordem,
+    }));
+    if (!orgaosOrigem.length && act.orgao) {
+      orgaosOrigem.push({
+        id: act.orgao.id,
+        nome: act.orgao.nome,
+        sigla: act.orgao.sigla,
+        ordem: 0,
+      });
+    }
+    const signatarios = act.signatories.map((s) => ({
+      id: s.id,
+      signatoryId: s.signatoryId,
+      nome: s.nome,
+      cargo: s.cargo,
+      ordem: s.ordem,
+    }));
+    const prefixoResolvido = resolveTituloPrefixo(
+      act.prefixoTituloModo,
+      act.prefixoTitulo,
+      orgaosOrigem,
+    );
+
     return {
       ...act,
-      orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
+      orgaoOrigem: orgaosOrigem.map((o) => o.nome).join('; ') || act.orgao?.nome || act.orgaoOrigem,
+      meioPublicacao: act.meioPublicacao
+        ? { id: act.meioPublicacao.id, nome: act.meioPublicacao.nome }
+        : null,
+      orgaosOrigem,
+      signatarios,
       codigo: formatActCode(act.tipo, act.numero, act.ano),
-      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
+      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto, {
+        atoConjunto: act.atoConjunto,
+        prefixo: prefixoResolvido,
+      }),
       hierarchyValid: this.validateHierarchy(act.units),
-      attachments: act.attachments.map((a) => ({
-        id: a.id,
-        tipo: a.tipo,
-        url: a.url,
-        nome: a.nome,
-        titulo: a.titulo ?? a.nome,
-        href: a.href,
-        ordem: a.ordem,
-        ativo: a.ativo,
-        tamanho: a.tamanho,
-        criadoEm: a.criadoEm.toISOString(),
-        substituidoEm: a.substituidoEm?.toISOString() ?? null,
-        downloadUrl: a.url ? `/public/attachments/${a.id}/file` : null,
-        adminDownloadUrl: a.url ? `/admin/acts/${act.id}/attachments/${a.id}/file` : null,
-        directLink: a.url ? `/public/attachments/${a.id}/file` : a.href,
-      })),
+      attachments: mappedAttachments,
       arquivoOriginal:
         act.attachments.find(
           (a) =>
             a.ativo && (a.tipo === 'pdf_original' || a.tipo === 'digitalizado'),
         ) ?? null,
+      arquivoPublicacao:
+        act.attachments.find((a) => a.ativo && a.tipo === 'arquivo_publicacao') ?? null,
       anexosTopo: act.attachments
         .filter((a) => a.ativo && a.tipo === 'anexo_topo')
         .sort((a, b) => a.ordem - b.ordem),
@@ -585,6 +775,9 @@ export class NormativeActsService {
           appliedAt: e.appliedAt?.toISOString() ?? null,
         })),
       })),
+      originOrgs: undefined,
+      signatories: undefined,
+      orgao: undefined,
     };
   }
 
@@ -637,7 +830,18 @@ export class NormativeActsService {
   private async resolveOrgaoFields(dto: {
     orgaoOrigemId?: string;
     orgaoOrigem?: string;
+    orgaoOrigemIds?: string[];
   }): Promise<{ orgaoOrigemId?: string | null; orgaoOrigem?: string | null }> {
+    if (dto.orgaoOrigemIds !== undefined) {
+      if (!dto.orgaoOrigemIds.length) {
+        return { orgaoOrigemId: null, orgaoOrigem: null };
+      }
+      const primaryId = dto.orgaoOrigemIds[0];
+      const org = await this.prisma.originOrg.findUnique({ where: { id: primaryId } });
+      if (!org) throw new BadRequestException('Órgão de origem inválido');
+      if (!org.ativo) throw new BadRequestException('Órgão de origem inativo');
+      return { orgaoOrigemId: org.id, orgaoOrigem: org.nome };
+    }
     if (dto.orgaoOrigemId) {
       const org = await this.prisma.originOrg.findUnique({ where: { id: dto.orgaoOrigemId } });
       if (!org) throw new BadRequestException('Órgão de origem inválido');
@@ -650,18 +854,113 @@ export class NormativeActsService {
     return {};
   }
 
+  private async resolveMeioPublicacaoId(
+    meioPublicacaoId: string | null | undefined,
+  ): Promise<string | null | undefined> {
+    if (meioPublicacaoId === undefined) return undefined;
+    if (!meioPublicacaoId) return null;
+    const medium = await this.prisma.publicationMedium.findUnique({
+      where: { id: meioPublicacaoId },
+    });
+    if (!medium) throw new BadRequestException('Meio de publicação inválido');
+    if (!medium.ativo) throw new BadRequestException('Meio de publicação inativo');
+    return medium.id;
+  }
+
+  private async syncActOriginOrgs(actId: string, orgaoIds: string[]) {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const id of orgaoIds) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ordered.push(id);
+    }
+
+    if (ordered.length) {
+      const orgs = await this.prisma.originOrg.findMany({
+        where: { id: { in: ordered } },
+      });
+      if (orgs.length !== ordered.length) {
+        throw new BadRequestException('Um ou mais órgãos de origem são inválidos');
+      }
+      const inactive = orgs.find((o) => !o.ativo);
+      if (inactive) throw new BadRequestException('Órgão de origem inativo');
+      const byId = new Map(orgs.map((o) => [o.id, o]));
+      const named = ordered.map((id) => byId.get(id)!);
+
+      await this.prisma.$transaction([
+        this.prisma.actOriginOrg.deleteMany({ where: { actId } }),
+        this.prisma.actOriginOrg.createMany({
+          data: ordered.map((orgaoId, ordem) => ({ actId, orgaoId, ordem })),
+        }),
+        this.prisma.normativeAct.update({
+          where: { id: actId },
+          data: {
+            orgaoOrigemId: named[0]?.id ?? null,
+            orgaoOrigem: named.map((o) => o.nome).join('; ') || null,
+          },
+        }),
+      ]);
+    } else {
+      await this.prisma.$transaction([
+        this.prisma.actOriginOrg.deleteMany({ where: { actId } }),
+        this.prisma.normativeAct.update({
+          where: { id: actId },
+          data: { orgaoOrigemId: null, orgaoOrigem: null },
+        }),
+      ]);
+    }
+  }
+
+  private async syncActSignatories(actId: string, items: ActSignatoryInputDto[]) {
+    const sorted = [...items].sort((a, b) => a.ordem - b.ordem);
+    for (const item of sorted) {
+      if (item.signatoryId) {
+        const sig = await this.prisma.signatory.findUnique({ where: { id: item.signatoryId } });
+        if (!sig) throw new BadRequestException('Signatário inválido');
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.actSignatory.deleteMany({ where: { actId } }),
+      ...sorted.map((item, i) =>
+        this.prisma.actSignatory.create({
+          data: {
+            actId,
+            signatoryId: item.signatoryId || null,
+            nome: item.nome.trim(),
+            cargo: item.cargo.trim(),
+            ordem: item.ordem ?? i,
+          },
+        }),
+      ),
+    ]);
+  }
+
+  private resolveOrgaoIdsToSync(dto: {
+    orgaoOrigemIds?: string[];
+    orgaoOrigemId?: string;
+  }): string[] | undefined {
+    if (dto.orgaoOrigemIds !== undefined) return dto.orgaoOrigemIds;
+    if (dto.orgaoOrigemId !== undefined) {
+      return dto.orgaoOrigemId ? [dto.orgaoOrigemId] : [];
+    }
+    return undefined;
+  }
+
   async createAct(dto: CreateActDto) {
-    const slug = buildActSlug(dto.tipo, dto.ano, dto.numero);
+    const dataAto = dto.dataAto ? new Date(dto.dataAto) : undefined;
+    const ano = dataAto && !Number.isNaN(dataAto.getTime()) ? dataAto.getUTCFullYear() : dto.ano;
+    const slug = buildActSlug(dto.tipo, ano, dto.numero);
     const existing = await this.prisma.normativeAct.findFirst({
-      where: { OR: [{ slug }, { tipo: dto.tipo, numero: dto.numero, ano: dto.ano }] },
+      where: { OR: [{ slug }, { tipo: dto.tipo, numero: dto.numero, ano }] },
     });
     if (existing) {
       throw new ConflictException('Já existe um ato com este tipo, número e ano');
     }
 
     const orgaoFields = await this.resolveOrgaoFields(dto);
-    const dataAto = dto.dataAto ? new Date(dto.dataAto) : undefined;
-    const ano = dataAto && !Number.isNaN(dataAto.getTime()) ? dataAto.getUTCFullYear() : dto.ano;
+    const meioPublicacaoId = await this.resolveMeioPublicacaoId(dto.meioPublicacaoId);
 
     const act = await this.prisma.normativeAct.create({
       data: {
@@ -673,13 +972,30 @@ export class NormativeActsService {
         dataAto,
         dataPublicacao: dto.dataPublicacao ? new Date(dto.dataPublicacao) : undefined,
         ...orgaoFields,
+        ...(meioPublicacaoId !== undefined && { meioPublicacaoId }),
+        ...(dto.atoConjunto !== undefined && { atoConjunto: dto.atoConjunto }),
+        ...(dto.prefixoTituloModo !== undefined && { prefixoTituloModo: dto.prefixoTituloModo }),
+        ...(dto.prefixoTitulo !== undefined && {
+          prefixoTitulo: dto.prefixoTitulo?.trim() || null,
+        }),
         autoridadeSignataria: dto.autoridadeSignataria,
         palavrasChave: dto.palavrasChave ?? [],
-        slug: buildActSlug(dto.tipo, ano, dto.numero),
+        slug,
         statusPublicacao: PublicationStatus.rascunho,
         situacao: ActSituacao.vigente,
       },
     });
+
+    const orgaoIds = this.resolveOrgaoIdsToSync(dto);
+    if (orgaoIds !== undefined) {
+      await this.syncActOriginOrgs(act.id, orgaoIds);
+    } else if (orgaoFields.orgaoOrigemId) {
+      await this.syncActOriginOrgs(act.id, [orgaoFields.orgaoOrigemId]);
+    }
+
+    if (dto.signatories !== undefined) {
+      await this.syncActSignatories(act.id, dto.signatories);
+    }
 
     await recordInternalHistory(this.prisma, {
       actId: act.id,
@@ -688,35 +1004,58 @@ export class NormativeActsService {
       withSnapshot: true,
     });
 
-    return {
-      ...act,
-      codigo: formatActCode(act.tipo, act.numero, act.ano),
-      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
-      hierarchyValid: true,
-      units: [],
-    };
+    return this.getAdminById(act.id);
   }
 
   async updateAct(id: string, dto: UpdateActDto, userId?: string) {
     const existing = await this.ensureAct(id);
     this.assertEditable(existing);
     const orgaoFields = await this.resolveOrgaoFields(dto);
+    const meioPublicacaoId = await this.resolveMeioPublicacaoId(dto.meioPublicacaoId);
     const dataAto =
       dto.dataAto !== undefined ? (dto.dataAto ? new Date(dto.dataAto) : null) : undefined;
 
-    const act = await this.prisma.normativeAct.update({
+    let nextAno = existing.ano;
+    let nextSlug: string | undefined;
+    if (dataAto instanceof Date && !Number.isNaN(dataAto.getTime())) {
+      nextAno = dataAto.getUTCFullYear();
+      if (nextAno !== existing.ano) {
+        nextSlug = buildActSlug(existing.tipo, nextAno, existing.numero);
+        const clash = await this.prisma.normativeAct.findFirst({
+          where: {
+            OR: [
+              { slug: nextSlug },
+              { tipo: existing.tipo, numero: existing.numero, ano: nextAno },
+            ],
+            NOT: { id },
+          },
+        });
+        if (clash) {
+          throw new ConflictException('Já existe um ato com este tipo, número e ano');
+        }
+      }
+    }
+
+    await this.prisma.normativeAct.update({
       where: { id },
       data: {
         ...(dto.ementa !== undefined && { ementa: dto.ementa }),
         ...(dto.assunto !== undefined && { assunto: dto.assunto }),
         ...(dto.situacao !== undefined && { situacao: dto.situacao }),
+        ...(dto.etapaEditorial !== undefined && { etapaEditorial: dto.etapaEditorial }),
         ...(dataAto !== undefined && { dataAto }),
-        ...(dataAto instanceof Date &&
-          !Number.isNaN(dataAto.getTime()) && { ano: dataAto.getUTCFullYear() }),
+        ...(nextAno !== existing.ano && { ano: nextAno }),
+        ...(nextSlug && { slug: nextSlug }),
         ...(dto.dataPublicacao !== undefined && {
           dataPublicacao: dto.dataPublicacao ? new Date(dto.dataPublicacao) : null,
         }),
         ...orgaoFields,
+        ...(meioPublicacaoId !== undefined && { meioPublicacaoId }),
+        ...(dto.atoConjunto !== undefined && { atoConjunto: dto.atoConjunto }),
+        ...(dto.prefixoTituloModo !== undefined && { prefixoTituloModo: dto.prefixoTituloModo }),
+        ...(dto.prefixoTitulo !== undefined && {
+          prefixoTitulo: dto.prefixoTitulo?.trim() || null,
+        }),
         ...(dto.autoridadeSignataria !== undefined && {
           autoridadeSignataria: dto.autoridadeSignataria,
         }),
@@ -725,25 +1064,40 @@ export class NormativeActsService {
           observacoesInternas: dto.observacoesInternas,
         }),
       },
-      include: { units: { orderBy: { ordem: 'asc' } }, orgao: true },
     });
+
+    const orgaoIds = this.resolveOrgaoIdsToSync(dto);
+    if (orgaoIds !== undefined) {
+      await this.syncActOriginOrgs(id, orgaoIds);
+    } else if (dto.orgaoOrigemId && orgaoFields.orgaoOrigemId) {
+      await this.syncActOriginOrgs(id, [orgaoFields.orgaoOrigemId]);
+    }
+
+    if (dto.signatories !== undefined) {
+      await this.syncActSignatories(id, dto.signatories);
+    }
+
+    const changed: string[] = [];
+    if (dto.dataPublicacao !== undefined) changed.push('dataPublicacao');
+    if (dto.meioPublicacaoId !== undefined) changed.push('meioPublicacao');
+    if (orgaoIds !== undefined || dto.orgaoOrigemId !== undefined) changed.push('orgaos');
+    if (dto.signatories !== undefined) changed.push('signatarios');
+    if (dto.prefixoTituloModo !== undefined || dto.prefixoTitulo !== undefined) {
+      changed.push('prefixo');
+    }
+    if (dto.atoConjunto !== undefined) changed.push('atoConjunto');
 
     await recordInternalHistory(this.prisma, {
       actId: id,
       userId,
       acao: 'editar_metadados',
-      resumo: 'Alterou metadados do ato',
+      resumo: changed.length
+        ? `Alterou metadados do ato (${changed.join(', ')})`
+        : 'Alterou metadados do ato',
       withSnapshot: true,
     });
 
-    return {
-      ...act,
-      orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
-      codigo: formatActCode(act.tipo, act.numero, act.ano),
-      tituloFormal: formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto),
-      hierarchyValid: this.validateHierarchy(act.units),
-      orgao: undefined,
-    };
+    return this.getAdminById(id);
   }
 
   async saveUnits(actId: string, dto: SaveUnitsDto, userId?: string) {
@@ -1090,7 +1444,15 @@ export class NormativeActsService {
     if (!act.editionOpen) {
       await this.prisma.normativeAct.update({
         where: { id },
-        data: { statusPublicacao: PublicationStatus.em_revisao },
+        data: {
+          statusPublicacao: PublicationStatus.em_revisao,
+          etapaEditorial: EditorialStage.aguardando_revisao,
+        },
+      });
+    } else {
+      await this.prisma.normativeAct.update({
+        where: { id },
+        data: { etapaEditorial: EditorialStage.aguardando_revisao },
       });
     }
 
@@ -1109,8 +1471,23 @@ export class NormativeActsService {
 
   async publish(id: string, userId?: string) {
     const act = await this.ensureAct(id);
-    if (act.units.length === 0) {
+    const fileOnly = act.etapaEditorial === EditorialStage.somente_arquivo_original;
+    if (act.units.length === 0 && !fileOnly) {
       throw new BadRequestException('Ato sem dispositivos não pode ser publicado');
+    }
+    if (fileOnly && act.units.length === 0) {
+      const hasOriginal = await this.prisma.attachment.findFirst({
+        where: {
+          actId: id,
+          ativo: true,
+          tipo: { in: ['pdf_original', 'digitalizado'] },
+        },
+      });
+      if (!hasOriginal) {
+        throw new BadRequestException(
+          'Atos “Somente arquivo original” precisam do arquivo original anexado para publicar',
+        );
+      }
     }
 
     const isAdminCorrection = act.editionOpen;
@@ -1120,6 +1497,10 @@ export class NormativeActsService {
     });
     const revisionNumber = (last?.revisionNumber ?? 0) + 1;
     const snapshot = await buildActSnapshot(this.prisma, id);
+    const nextEtapa =
+      act.units.length > 0
+        ? EditorialStage.estruturado
+        : EditorialStage.somente_arquivo_original;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.actPublicRevision.updateMany({
@@ -1140,6 +1521,7 @@ export class NormativeActsService {
         data: {
           statusPublicacao: PublicationStatus.publicado,
           editionOpen: false,
+          etapaEditorial: nextEtapa,
         },
       });
     });
@@ -1192,7 +1574,12 @@ export class NormativeActsService {
 
     await this.prisma.normativeAct.update({
       where: { id },
-      data: { editionOpen: true },
+      data: {
+        editionOpen: true,
+        ...(act.etapaEditorial === EditorialStage.somente_arquivo_original
+          ? { etapaEditorial: EditorialStage.em_estruturacao }
+          : {}),
+      },
     });
 
     await recordInternalHistory(this.prisma, {
@@ -1200,6 +1587,33 @@ export class NormativeActsService {
       userId,
       acao: 'criar_versao',
       resumo: 'Abriu nova versão de trabalho a partir da versão publicada',
+      withSnapshot: true,
+    });
+
+    return this.getAdminById(id);
+  }
+
+  /** Inicia a estruturação de um ato “Somente arquivo original” no mesmo cadastro. */
+  async startStructuring(id: string, userId?: string) {
+    const act = await this.ensureAct(id);
+    if (act.etapaEditorial !== EditorialStage.somente_arquivo_original) {
+      return this.getAdminById(id);
+    }
+
+    if (act.statusPublicacao === PublicationStatus.publicado && !act.editionOpen) {
+      await this.createEdition(id, userId);
+    }
+
+    await this.prisma.normativeAct.update({
+      where: { id },
+      data: { etapaEditorial: EditorialStage.em_estruturacao },
+    });
+
+    await recordInternalHistory(this.prisma, {
+      actId: id,
+      userId,
+      acao: 'iniciar_estruturacao',
+      resumo: 'Iniciou estruturação do texto a partir do arquivo original',
       withSnapshot: true,
     });
 

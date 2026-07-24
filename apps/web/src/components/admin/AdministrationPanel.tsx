@@ -8,25 +8,35 @@ import { Input, Select } from '@/components/ui/Form';
 import { useToast } from '@/components/ui/Toast';
 import {
   createOrgan,
+  createPublicationMedium,
+  createSignatory,
   createUser,
   listOrgans,
   listPermissions,
+  listPublicationMedia,
   listRoles,
+  listSignatories,
   listUsers,
   setRolePermissions,
   updateOrgan,
+  updatePublicationMedium,
+  updateSignatory,
   updateUser,
   type AdminRole,
+  type AdminSignatory,
   type AdminUser,
   type OriginOrg,
+  type PublicationMedium,
 } from '@/lib/admin-api';
 import { cn } from '@/lib/format';
 
-type Tab = 'usuarios' | 'orgaos' | 'permissoes';
+type Tab = 'usuarios' | 'orgaos' | 'meios' | 'signatarios' | 'permissoes';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'usuarios', label: 'Usuários' },
   { id: 'orgaos', label: 'Órgãos de Origem' },
+  { id: 'meios', label: 'Meios de publicação' },
+  { id: 'signatarios', label: 'Signatários' },
   { id: 'permissoes', label: 'Permissões' },
 ];
 
@@ -37,20 +47,26 @@ export function AdministrationPanel() {
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [organs, setOrgans] = useState<OriginOrg[]>([]);
+  const [media, setMedia] = useState<PublicationMedium[]>([]);
+  const [signatories, setSignatories] = useState<AdminSignatory[]>([]);
   const [roles, setRoles] = useState<AdminRole[]>([]);
   const [permissions, setPermissions] = useState<{ id: string; chave: string }[]>([]);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, o, r, p] = await Promise.all([
+      const [u, o, m, s, r, p] = await Promise.all([
         listUsers(),
         listOrgans(false),
+        listPublicationMedia(false),
+        listSignatories(false),
         listRoles(),
         listPermissions(),
       ]);
       setUsers(u);
       setOrgans(o);
+      setMedia(m);
+      setSignatories(s);
       setRoles(r);
       setPermissions(p);
     } catch (err) {
@@ -95,12 +111,12 @@ export function AdministrationPanel() {
           <UsersTab users={users} roles={roles} onChanged={reload} />
         ) : tab === 'orgaos' ? (
           <OrgansTab organs={organs} onChanged={reload} />
+        ) : tab === 'meios' ? (
+          <PublicationMediaTab media={media} onChanged={reload} />
+        ) : tab === 'signatarios' ? (
+          <SignatoriesTab signatories={signatories} organs={organs} onChanged={reload} />
         ) : (
-          <PermissionsTab
-            roles={roles}
-            permissions={permissions}
-            onChanged={reload}
-          />
+          <PermissionsTab roles={roles} permissions={permissions} onChanged={reload} />
         )}
       </div>
     </div>
@@ -151,7 +167,7 @@ function UsersTab({
           />
           <Input
             type="password"
-            placeholder="Senha (mín. 6)"
+            placeholder="Senha"
             required
             minLength={6}
             value={form.senha}
@@ -181,14 +197,12 @@ function UsersTab({
           <li key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div>
               <p className="text-[14px] font-semibold text-ink">{u.nome}</p>
-              <p className="text-[12.5px] text-ink-3">{u.email}</p>
+              <p className="text-[12px] text-ink-3">{u.email}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="neutral">{u.role.nome}</Badge>
-              <Badge variant={u.ativo ? 'ok' : 'danger'}>{u.ativo ? 'Ativo' : 'Inativo'}</Badge>
+            <div className="flex items-center gap-2">
               <Select
-                className="w-auto min-w-[140px]"
                 value={u.role.id}
+                className="w-auto text-[12px]"
                 onChange={async (e) => {
                   try {
                     await updateUser(u.id, { roleId: e.target.value });
@@ -205,6 +219,7 @@ function UsersTab({
                   </option>
                 ))}
               </Select>
+              <Badge variant={u.ativo ? 'ok' : 'danger'}>{u.ativo ? 'Ativo' : 'Inativo'}</Badge>
               <Button
                 size="sm"
                 variant="ghost"
@@ -237,15 +252,18 @@ function OrgansTab({
 }) {
   const { toast } = useToast();
   const [nome, setNome] = useState('');
+  const [sigla, setSigla] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [editNome, setEditNome] = useState('');
+  const [editSigla, setEditSigla] = useState('');
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await createOrgan(nome);
+      await createOrgan(nome, sigla || null);
       toast('Órgão cadastrado', 'ok');
       setNome('');
+      setSigla('');
       await onChanged();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Erro', 'danger');
@@ -254,13 +272,22 @@ function OrgansTab({
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <form onSubmit={submit} className="flex flex-wrap gap-2 rounded-[14px] border border-line bg-surface p-4 shadow-sm">
+      <form
+        onSubmit={submit}
+        className="flex flex-wrap gap-2 rounded-[14px] border border-line bg-surface p-4 shadow-sm"
+      >
         <Input
           className="min-w-[220px] flex-1"
           placeholder="Nome do órgão"
           required
           value={nome}
           onChange={(e) => setNome(e.target.value)}
+        />
+        <Input
+          className="w-28"
+          placeholder="Sigla"
+          value={sigla}
+          onChange={(e) => setSigla(e.target.value.toUpperCase())}
         />
         <Button type="submit" size="sm">
           Incluir órgão
@@ -276,7 +303,7 @@ function OrgansTab({
                 onSubmit={async (e) => {
                   e.preventDefault();
                   try {
-                    await updateOrgan(o.id, { nome: editNome });
+                    await updateOrgan(o.id, { nome: editNome, sigla: editSigla || null });
                     toast('Órgão atualizado', 'ok');
                     setEditing(null);
                     await onChanged();
@@ -291,6 +318,12 @@ function OrgansTab({
                   onChange={(e) => setEditNome(e.target.value)}
                   required
                 />
+                <Input
+                  className="w-28"
+                  value={editSigla}
+                  onChange={(e) => setEditSigla(e.target.value.toUpperCase())}
+                  placeholder="Sigla"
+                />
                 <Button type="submit" size="sm">
                   Salvar
                 </Button>
@@ -301,7 +334,10 @@ function OrgansTab({
             ) : (
               <>
                 <div>
-                  <p className="text-[14px] font-semibold text-ink">{o.nome}</p>
+                  <p className="text-[14px] font-semibold text-ink">
+                    {o.sigla ? `${o.sigla} — ` : ''}
+                    {o.nome}
+                  </p>
                   <p className="text-[12px] text-ink-3">
                     {o._count?.acts ?? 0} ato(s) vinculado(s)
                   </p>
@@ -316,6 +352,7 @@ function OrgansTab({
                     onClick={() => {
                       setEditing(o.id);
                       setEditNome(o.nome);
+                      setEditSigla(o.sigla ?? '');
                     }}
                   >
                     Editar
@@ -342,7 +379,317 @@ function OrgansTab({
         ))}
       </ul>
       <p className="text-[12.5px] text-ink-3">
-        Órgãos vinculados a atos não são excluídos — apenas inativados, preservando o histórico.
+        Órgãos vinculados a atos não são excluídos — apenas inativados, preservando o histórico. A
+        sigla é usada no prefixo automático do título formal.
+      </p>
+    </div>
+  );
+}
+
+function PublicationMediaTab({
+  media,
+  onChanged,
+}: {
+  media: PublicationMedium[];
+  onChanged: () => Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [nome, setNome] = useState('');
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editNome, setEditNome] = useState('');
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await createPublicationMedium(nome);
+            toast('Meio de publicação cadastrado', 'ok');
+            setNome('');
+            await onChanged();
+          } catch (err) {
+            toast(err instanceof Error ? err.message : 'Erro', 'danger');
+          }
+        }}
+        className="flex flex-wrap gap-2 rounded-[14px] border border-line bg-surface p-4 shadow-sm"
+      >
+        <Input
+          className="min-w-[220px] flex-1"
+          placeholder="Ex.: Diário Oficial Eletrônico"
+          required
+          value={nome}
+          onChange={(e) => setNome(e.target.value)}
+        />
+        <Button type="submit" size="sm">
+          Incluir meio
+        </Button>
+      </form>
+
+      <ul className="divide-y divide-line rounded-[14px] border border-line bg-surface shadow-sm">
+        {media.map((m) => (
+          <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            {editing === m.id ? (
+              <form
+                className="flex flex-1 flex-wrap gap-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    await updatePublicationMedium(m.id, { nome: editNome });
+                    toast('Meio atualizado', 'ok');
+                    setEditing(null);
+                    await onChanged();
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : 'Erro', 'danger');
+                  }
+                }}
+              >
+                <Input
+                  className="min-w-[180px] flex-1"
+                  value={editNome}
+                  onChange={(e) => setEditNome(e.target.value)}
+                  required
+                />
+                <Button type="submit" size="sm">
+                  Salvar
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                  Cancelar
+                </Button>
+              </form>
+            ) : (
+              <>
+                <div>
+                  <p className="text-[14px] font-semibold text-ink">{m.nome}</p>
+                  <p className="text-[12px] text-ink-3">
+                    {m._count?.acts ?? 0} ato(s) vinculado(s)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={m.ativo ? 'ok' : 'danger'}>
+                    {m.ativo ? 'Ativo' : 'Inativo'}
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setEditing(m.id);
+                      setEditNome(m.nome);
+                    }}
+                  >
+                    Editar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={async () => {
+                      try {
+                        await updatePublicationMedium(m.id, { ativo: !m.ativo });
+                        toast(m.ativo ? 'Meio inativado' : 'Meio reativado', 'ok');
+                        await onChanged();
+                      } catch (err) {
+                        toast(err instanceof Error ? err.message : 'Erro', 'danger');
+                      }
+                    }}
+                  >
+                    {m.ativo ? 'Inativar' : 'Reativar'}
+                  </Button>
+                </div>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="text-[12.5px] text-ink-3">
+        Meios já vinculados a atos não podem ser excluídos — apenas inativados. Meios inativos
+        continuam visíveis nos atos antigos.
+      </p>
+    </div>
+  );
+}
+
+function SignatoriesTab({
+  signatories,
+  organs,
+  onChanged,
+}: {
+  signatories: AdminSignatory[];
+  organs: OriginOrg[];
+  onChanged: () => Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [form, setForm] = useState({ nome: '', cargo: '', orgaoId: '' });
+  const [editing, setEditing] = useState<string | null>(null);
+  const [edit, setEdit] = useState({ nome: '', cargo: '', orgaoId: '' });
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await createSignatory({
+              nome: form.nome,
+              cargo: form.cargo,
+              orgaoId: form.orgaoId || null,
+            });
+            toast('Signatário cadastrado', 'ok');
+            setForm({ nome: '', cargo: '', orgaoId: '' });
+            await onChanged();
+          } catch (err) {
+            toast(err instanceof Error ? err.message : 'Erro', 'danger');
+          }
+        }}
+        className="space-y-3 rounded-[14px] border border-line bg-surface p-4 shadow-sm"
+      >
+        <h3 className="text-section">Novo signatário</h3>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input
+            placeholder="Nome completo"
+            required
+            value={form.nome}
+            onChange={(e) => setForm({ ...form, nome: e.target.value })}
+          />
+          <Input
+            placeholder="Cargo ou função"
+            required
+            value={form.cargo}
+            onChange={(e) => setForm({ ...form, cargo: e.target.value })}
+          />
+          <Select
+            value={form.orgaoId}
+            onChange={(e) => setForm({ ...form, orgaoId: e.target.value })}
+            className="sm:col-span-2"
+          >
+            <option value="">Órgão (opcional)</option>
+            {organs
+              .filter((o) => o.ativo)
+              .map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.sigla ? `${o.sigla} — ${o.nome}` : o.nome}
+                </option>
+              ))}
+          </Select>
+        </div>
+        <div className="flex justify-end">
+          <Button type="submit" size="sm">
+            Incluir signatário
+          </Button>
+        </div>
+      </form>
+
+      <ul className="divide-y divide-line rounded-[14px] border border-line bg-surface shadow-sm">
+        {signatories.map((s) => (
+          <li key={s.id} className="px-4 py-3">
+            {editing === s.id ? (
+              <form
+                className="space-y-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    await updateSignatory(s.id, {
+                      nome: edit.nome,
+                      cargo: edit.cargo,
+                      orgaoId: edit.orgaoId || null,
+                    });
+                    toast('Signatário atualizado', 'ok');
+                    setEditing(null);
+                    await onChanged();
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : 'Erro', 'danger');
+                  }
+                }}
+              >
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    value={edit.nome}
+                    onChange={(e) => setEdit({ ...edit, nome: e.target.value })}
+                    required
+                  />
+                  <Input
+                    value={edit.cargo}
+                    onChange={(e) => setEdit({ ...edit, cargo: e.target.value })}
+                    required
+                  />
+                  <Select
+                    value={edit.orgaoId}
+                    onChange={(e) => setEdit({ ...edit, orgaoId: e.target.value })}
+                    className="sm:col-span-2"
+                  >
+                    <option value="">Órgão (opcional)</option>
+                    {organs.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.sigla ? `${o.sigla} — ${o.nome}` : o.nome}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button type="submit" size="sm">
+                    Salvar
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                    Cancelar
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[14px] font-semibold text-ink">{s.nome}</p>
+                  <p className="text-[12.5px] text-ink-2">{s.cargo}</p>
+                  {s.orgao && (
+                    <p className="text-[12px] text-ink-3">
+                      {s.orgao.sigla ? `${s.orgao.sigla} — ` : ''}
+                      {s.orgao.nome}
+                    </p>
+                  )}
+                  <p className="text-[11px] text-ink-4">
+                    {s._count?.links ?? 0} vínculo(s) em atos
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={s.ativo ? 'ok' : 'danger'}>
+                    {s.ativo ? 'Ativo' : 'Inativo'}
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setEditing(s.id);
+                      setEdit({
+                        nome: s.nome,
+                        cargo: s.cargo,
+                        orgaoId: s.orgaoId ?? '',
+                      });
+                    }}
+                  >
+                    Editar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={async () => {
+                      try {
+                        await updateSignatory(s.id, { ativo: !s.ativo });
+                        toast(s.ativo ? 'Signatário inativado' : 'Signatário reativado', 'ok');
+                        await onChanged();
+                      } catch (err) {
+                        toast(err instanceof Error ? err.message : 'Erro', 'danger');
+                      }
+                    }}
+                  >
+                    {s.ativo ? 'Inativar' : 'Reativar'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="text-[12.5px] text-ink-3">
+        Alterações no cadastro geral não modificam automaticamente os snapshots já vinculados a
+        atos publicados.
       </p>
     </div>
   );

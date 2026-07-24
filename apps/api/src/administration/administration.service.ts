@@ -21,17 +21,20 @@ export class AdministrationService {
     });
   }
 
-  async createOrgan(nome: string) {
+  async createOrgan(nome: string, sigla?: string | null) {
     const trimmed = nome.trim();
     if (trimmed.length < 2) throw new BadRequestException('Nome do órgão inválido');
     const existing = await this.prisma.originOrg.findFirst({
       where: { nome: { equals: trimmed, mode: 'insensitive' } },
     });
     if (existing) throw new ConflictException('Já existe um órgão com este nome');
-    return this.prisma.originOrg.create({ data: { nome: trimmed, ativo: true } });
+    const siglaTrimmed = sigla?.trim() || null;
+    return this.prisma.originOrg.create({
+      data: { nome: trimmed, sigla: siglaTrimmed, ativo: true },
+    });
   }
 
-  async updateOrgan(id: string, data: { nome?: string; ativo?: boolean }) {
+  async updateOrgan(id: string, data: { nome?: string; sigla?: string | null; ativo?: boolean }) {
     const org = await this.prisma.originOrg.findUnique({ where: { id } });
     if (!org) throw new NotFoundException('Órgão não encontrado');
 
@@ -52,18 +55,175 @@ export class AdministrationService {
       where: { id },
       data: {
         ...(data.nome !== undefined && { nome: data.nome }),
+        ...(data.sigla !== undefined && { sigla: data.sigla?.trim() || null }),
         ...(data.ativo !== undefined && { ativo: data.ativo }),
       },
     });
 
     if (data.nome) {
-      await this.prisma.normativeAct.updateMany({
-        where: { orgaoOrigemId: id },
-        data: { orgaoOrigem: data.nome },
-      });
+      await this.refreshActsOrgaoDenormForOrgan(id);
     }
 
     return updated;
+  }
+
+  private async refreshActsOrgaoDenormForOrgan(orgaoId: string) {
+    const links = await this.prisma.actOriginOrg.findMany({
+      where: { orgaoId },
+      select: { actId: true },
+      distinct: ['actId'],
+    });
+    for (const { actId } of links) {
+      const orgs = await this.prisma.actOriginOrg.findMany({
+        where: { actId },
+        orderBy: { ordem: 'asc' },
+        include: { orgao: true },
+      });
+      const primary = orgs[0];
+      await this.prisma.normativeAct.update({
+        where: { id: actId },
+        data: {
+          orgaoOrigem: orgs.map((o) => o.orgao.nome).join('; ') || null,
+          orgaoOrigemId: primary?.orgaoId ?? null,
+        },
+      });
+    }
+    // Atos legados só com FK direta
+    const legacy = await this.prisma.normativeAct.findMany({
+      where: { orgaoOrigemId: orgaoId, originOrgs: { none: {} } },
+      select: { id: true },
+    });
+    if (legacy.length) {
+      const org = await this.prisma.originOrg.findUnique({ where: { id: orgaoId } });
+      if (org) {
+        await this.prisma.normativeAct.updateMany({
+          where: { id: { in: legacy.map((a) => a.id) } },
+          data: { orgaoOrigem: org.nome },
+        });
+      }
+    }
+  }
+
+  // ─── Meios de publicação ───────────────────────────────────────────────────
+
+  listPublicationMedia(includeInactive = true) {
+    return this.prisma.publicationMedium.findMany({
+      where: includeInactive ? undefined : { ativo: true },
+      orderBy: { nome: 'asc' },
+      include: { _count: { select: { acts: true } } },
+    });
+  }
+
+  async createPublicationMedium(nome: string) {
+    const trimmed = nome.trim();
+    if (trimmed.length < 2) throw new BadRequestException('Nome do meio de publicação inválido');
+    const existing = await this.prisma.publicationMedium.findFirst({
+      where: { nome: { equals: trimmed, mode: 'insensitive' } },
+    });
+    if (existing) throw new ConflictException('Já existe um meio de publicação com este nome');
+    return this.prisma.publicationMedium.create({ data: { nome: trimmed, ativo: true } });
+  }
+
+  async updatePublicationMedium(id: string, data: { nome?: string; ativo?: boolean }) {
+    const medium = await this.prisma.publicationMedium.findUnique({ where: { id } });
+    if (!medium) throw new NotFoundException('Meio de publicação não encontrado');
+
+    if (data.nome !== undefined) {
+      const trimmed = data.nome.trim();
+      if (trimmed.length < 2) throw new BadRequestException('Nome do meio de publicação inválido');
+      const clash = await this.prisma.publicationMedium.findFirst({
+        where: {
+          nome: { equals: trimmed, mode: 'insensitive' },
+          NOT: { id },
+        },
+      });
+      if (clash) throw new ConflictException('Já existe um meio de publicação com este nome');
+      data.nome = trimmed;
+    }
+
+    return this.prisma.publicationMedium.update({
+      where: { id },
+      data: {
+        ...(data.nome !== undefined && { nome: data.nome }),
+        ...(data.ativo !== undefined && { ativo: data.ativo }),
+      },
+    });
+  }
+
+  // ─── Signatários ───────────────────────────────────────────────────────────
+
+  listSignatories(includeInactive = true) {
+    return this.prisma.signatory.findMany({
+      where: includeInactive ? undefined : { ativo: true },
+      orderBy: [{ nome: 'asc' }, { cargo: 'asc' }],
+      include: {
+        orgao: { select: { id: true, nome: true, sigla: true } },
+        _count: { select: { links: true } },
+      },
+    });
+  }
+
+  async createSignatory(data: { nome: string; cargo: string; orgaoId?: string | null }) {
+    const nome = data.nome?.trim();
+    const cargo = data.cargo?.trim();
+    if (!nome || nome.length < 2) throw new BadRequestException('Nome do signatário inválido');
+    if (!cargo || cargo.length < 2) throw new BadRequestException('Cargo do signatário inválido');
+
+    let orgaoId: string | null = null;
+    if (data.orgaoId) {
+      const org = await this.prisma.originOrg.findUnique({ where: { id: data.orgaoId } });
+      if (!org) throw new BadRequestException('Órgão inválido');
+      orgaoId = org.id;
+    }
+
+    return this.prisma.signatory.create({
+      data: { nome, cargo, orgaoId, ativo: true },
+      include: { orgao: { select: { id: true, nome: true, sigla: true } } },
+    });
+  }
+
+  async updateSignatory(
+    id: string,
+    data: { nome?: string; cargo?: string; orgaoId?: string | null; ativo?: boolean },
+  ) {
+    const existing = await this.prisma.signatory.findUnique({
+      where: { id },
+      include: { _count: { select: { links: true } } },
+    });
+    if (!existing) throw new NotFoundException('Signatário não encontrado');
+
+    if (data.nome !== undefined) {
+      const nome = data.nome.trim();
+      if (nome.length < 2) throw new BadRequestException('Nome do signatário inválido');
+      data.nome = nome;
+    }
+    if (data.cargo !== undefined) {
+      const cargo = data.cargo.trim();
+      if (cargo.length < 2) throw new BadRequestException('Cargo do signatário inválido');
+      data.cargo = cargo;
+    }
+
+    let orgaoId: string | null | undefined = undefined;
+    if (data.orgaoId !== undefined) {
+      if (data.orgaoId) {
+        const org = await this.prisma.originOrg.findUnique({ where: { id: data.orgaoId } });
+        if (!org) throw new BadRequestException('Órgão inválido');
+        orgaoId = org.id;
+      } else {
+        orgaoId = null;
+      }
+    }
+
+    return this.prisma.signatory.update({
+      where: { id },
+      data: {
+        ...(data.nome !== undefined && { nome: data.nome }),
+        ...(data.cargo !== undefined && { cargo: data.cargo }),
+        ...(orgaoId !== undefined && { orgaoId }),
+        ...(data.ativo !== undefined && { ativo: data.ativo }),
+      },
+      include: { orgao: { select: { id: true, nome: true, sigla: true } } },
+    });
   }
 
   // ─── Usuários ──────────────────────────────────────────────────────────────

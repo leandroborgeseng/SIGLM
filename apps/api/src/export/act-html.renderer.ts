@@ -1,5 +1,11 @@
 import type { ActType, UnitType } from '@prisma/client';
-import { formatActCode, formatFormalTitle, SITUACAO_LABELS } from '../normative-acts/normative-acts.utils';
+import {
+  formatActCode,
+  formatDateLong,
+  formatFormalTitle,
+  resolveTituloPrefixo,
+  SITUACAO_LABELS,
+} from '../normative-acts/normative-acts.utils';
 import {
   escapeHtml,
   formatacaoToCss,
@@ -19,6 +25,12 @@ export interface ExportUnit {
   nota: string | null;
 }
 
+export interface ExportSignatory {
+  nome: string;
+  cargo: string;
+  ordem: number;
+}
+
 export interface ExportAct {
   tipo: ActType;
   numero: number;
@@ -29,12 +41,14 @@ export interface ExportAct {
   orgaoOrigem: string | null;
   dataAto: Date | null;
   dataPublicacao: Date | null;
+  atoConjunto?: boolean;
+  prefixoTituloModo?: string | null;
+  prefixoTitulo?: string | null;
+  orgaosOrigem?: { nome: string; sigla?: string | null }[];
+  meioPublicacao?: { id: string; nome: string } | null;
+  arquivoPublicacaoUrl?: string | null;
+  signatarios?: ExportSignatory[];
   units: ExportUnit[];
-}
-
-function formatDateBr(date: Date | null): string {
-  if (!date) return '—';
-  return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 }
 
 function noteClass(nota: string | null): string {
@@ -120,9 +134,60 @@ function renderUnit(unit: ExportUnit): string {
   return `<p class="indent">${texto}</p>`;
 }
 
+function renderSignatories(signatarios: ExportSignatory[] | undefined): string {
+  if (!signatarios?.length) return '';
+  const sorted = [...signatarios].sort((a, b) => a.ordem - b.ordem);
+  const items = sorted
+    .map(
+      (s) => `<div class="signatory">
+      <p class="signatory-nome">${escapeHtml(s.nome)}</p>
+      <p class="signatory-cargo">${escapeHtml(s.cargo)}</p>
+    </div>`,
+    )
+    .join('\n');
+  return `<section class="signatories" aria-label="Signatários">${items}</section>`;
+}
+
+/** Frase institucional (ticket 37) sobre o texto publicado. */
+export function buildPublicationDisclaimer(act: {
+  dataPublicacao?: Date | null;
+  meioPublicacao?: { nome: string } | null;
+  arquivoPublicacaoUrl?: string | null;
+}): string {
+  const meio = act.meioPublicacao?.nome?.trim() || null;
+  const data = act.dataPublicacao ? formatDateLong(act.dataPublicacao) : null;
+  const hasData = Boolean(act.dataPublicacao && data && data !== '—');
+  const linkMeio =
+    meio && act.arquivoPublicacaoUrl
+      ? `<a href="${escapeHtml(act.arquivoPublicacaoUrl)}">${escapeHtml(meio)}</a>`
+      : meio
+        ? escapeHtml(meio)
+        : null;
+
+  if (linkMeio && hasData) {
+    return `Este texto não substitui o publicado no ${linkMeio} em ${escapeHtml(data!)}.`;
+  }
+  if (linkMeio) {
+    return `Este texto não substitui o publicado no ${linkMeio}.`;
+  }
+  if (hasData) {
+    return `Este texto não substitui o publicado em ${escapeHtml(data!)}.`;
+  }
+  return 'Este texto não substitui o publicado.';
+}
+
 export function renderConsolidatedHtml(act: ExportAct): string {
   const codigo = formatActCode(act.tipo, act.numero, act.ano);
-  const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
+  const orgs = act.orgaosOrigem?.length
+    ? act.orgaosOrigem
+    : act.orgaoOrigem
+      ? [{ nome: act.orgaoOrigem, sigla: null }]
+      : [];
+  const prefixo = resolveTituloPrefixo(act.prefixoTituloModo, act.prefixoTitulo, orgs);
+  const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto, {
+    atoConjunto: act.atoConjunto,
+    prefixo,
+  });
   const situacao = SITUACAO_LABELS[act.situacao] ?? act.situacao;
   const sorted = sortUnitsForDisplay(act.units);
   const hasEmentaUnit = sorted.some((u) => u.tipoUnidade === 'ementa');
@@ -135,6 +200,9 @@ export function renderConsolidatedHtml(act: ExportAct): string {
       return `<article class="unit">${body}${nota}</article>`;
     })
     .join('\n');
+
+  const signatoriesHtml = renderSignatories(act.signatarios);
+  const disclaimer = buildPublicationDisclaimer(act);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -170,6 +238,12 @@ export function renderConsolidatedHtml(act: ExportAct): string {
     .note-warn { color: var(--warn); }
     .note-danger { color: var(--danger); }
     .note-ok { color: var(--ok); }
+    .signatories { max-width: 900px; margin: 2.5rem auto 0; text-align: center; }
+    .signatory { margin: 0 0 1.25rem; }
+    .signatory-nome { margin: 0; font-weight: 700; }
+    .signatory-cargo { margin: .15rem 0 0; font-size: 14px; color: var(--ink-2); }
+    .disclaimer { max-width: 900px; margin: 1.75rem auto 0; font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink-3); font-style: italic; text-align: center; }
+    .history-nav { max-width: 900px; margin: 1.75rem auto 0; padding-top: 1rem; border-top: 1px solid #e5eaf1; font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink-3); }
     .footer { max-width: 900px; margin: 2.5rem auto 0; padding-top: 1rem; border-top: 1px solid #e5eaf1; font-family: system-ui, sans-serif; font-size: 11px; color: var(--ink-4); }
     @media print { body { padding: 0; } }
   </style>
@@ -190,6 +264,11 @@ export function renderConsolidatedHtml(act: ExportAct): string {
   <main class="content">
 ${unitsHtml}
   </main>
+  ${signatoriesHtml}
+  <p class="disclaimer">${disclaimer}</p>
+  <nav class="history-nav" aria-label="Versões e histórico">
+    <p>Versões e histórico — consulte o portal para texto consolidado, original e histórico de alterações.</p>
+  </nav>
   <footer class="footer">Exportado do SIGLM — ${escapeHtml(codigo)}</footer>
 </body>
 </html>`;

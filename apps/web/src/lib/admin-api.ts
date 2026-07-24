@@ -1,11 +1,15 @@
 import type { ActAttachment, ActDetail, AdminListResponse, LegislativeEffect } from './types';
 import { AuthError } from './api';
 import { getApiBaseUrl } from './api-url';
+import {
+  authorizedFetch,
+  ensureFreshAccessToken,
+  forceRefreshAccessToken,
+  readAccessToken,
+} from './auth-session';
 
 function readClientToken(): string | undefined {
-  if (typeof document === 'undefined') return undefined;
-  const match = document.cookie.match(/(?:^|; )lm_access_token=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : undefined;
+  return readAccessToken();
 }
 
 async function adminFetch<T>(
@@ -14,18 +18,35 @@ async function adminFetch<T>(
   token?: string,
 ): Promise<T> {
   const API_URL = getApiBaseUrl();
-  const authToken = token ?? readClientToken();
+  // Garante access válido (renova via refresh se necessário) antes da chamada.
+  if (!token) await ensureFreshAccessToken();
+  const authToken = token ?? readAccessToken();
   let res: Response;
   try {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...init?.headers,
+    };
     res = await fetch(`${API_URL}${path}`, {
       ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        ...init?.headers,
-      },
+      headers,
       cache: 'no-store',
     });
+    if (res.status === 401 && !token) {
+      const fresh = await forceRefreshAccessToken();
+      if (fresh) {
+        res = await fetch(`${API_URL}${path}`, {
+          ...init,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${fresh}`,
+            ...init?.headers,
+          },
+          cache: 'no-store',
+        });
+      }
+    }
   } catch {
     throw new Error('Não foi possível conectar à API');
   }
@@ -53,9 +74,30 @@ export interface CreateActPayload {
 export interface OriginOrg {
   id: string;
   nome: string;
+  sigla?: string | null;
   ativo: boolean;
   _count?: { acts: number };
 }
+
+export interface PublicationMedium {
+  id: string;
+  nome: string;
+  ativo: boolean;
+  _count?: { acts: number };
+}
+
+export interface AdminSignatory {
+  id: string;
+  nome: string;
+  cargo: string;
+  orgaoId?: string | null;
+  ativo: boolean;
+  orgao?: { id: string; nome: string; sigla?: string | null } | null;
+  _count?: { links: number };
+}
+
+/** Alias do tipo de catálogo de signatários. */
+export type Signatory = AdminSignatory;
 
 export interface AdminUser {
   id: string;
@@ -78,16 +120,65 @@ export function listOrgans(ativosOnly = false, token?: string) {
   return adminFetch<OriginOrg[]>(`/admin/organs${q}`, undefined, token);
 }
 
-export function createOrgan(nome: string, token?: string) {
+export function createOrgan(nome: string, sigla?: string | null, token?: string) {
   return adminFetch<OriginOrg>('/admin/organs', {
+    method: 'POST',
+    body: JSON.stringify({ nome, sigla: sigla || null }),
+  }, token);
+}
+
+export function listPublicationMedia(ativosOnly = false, token?: string) {
+  const q = ativosOnly ? '?ativos=true' : '';
+  return adminFetch<PublicationMedium[]>(`/admin/publication-media${q}`, undefined, token);
+}
+
+export function createPublicationMedium(nome: string, token?: string) {
+  return adminFetch<PublicationMedium>('/admin/publication-media', {
     method: 'POST',
     body: JSON.stringify({ nome }),
   }, token);
 }
 
-export function updateOrgan(
+export function updatePublicationMedium(
   id: string,
   data: { nome?: string; ativo?: boolean },
+  token?: string,
+) {
+  return adminFetch<PublicationMedium>(`/admin/publication-media/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function listSignatories(ativosOnly = false, token?: string) {
+  const q = ativosOnly ? '?ativos=true' : '';
+  return adminFetch<AdminSignatory[]>(`/admin/signatories${q}`, undefined, token);
+}
+
+export function createSignatory(
+  data: { nome: string; cargo: string; orgaoId?: string | null },
+  token?: string,
+) {
+  return adminFetch<AdminSignatory>('/admin/signatories', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function updateSignatory(
+  id: string,
+  data: { nome?: string; cargo?: string; orgaoId?: string | null; ativo?: boolean },
+  token?: string,
+) {
+  return adminFetch<AdminSignatory>(`/admin/signatories/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }, token);
+}
+
+export function updateOrgan(
+  id: string,
+  data: { nome?: string; sigla?: string | null; ativo?: boolean },
   token?: string,
 ) {
   return adminFetch<OriginOrg>(`/admin/organs/${id}`, {
@@ -150,6 +241,36 @@ export interface UnitPayload {
     underline?: boolean;
     letterSpacing?: 'normal' | 'expanded';
   } | null;
+}
+
+export function adminListActs(
+  params?: {
+    q?: string;
+    situacao?: string;
+    statusPublicacao?: string;
+    etapaEditorial?: string;
+    norma?: string;
+    ementa?: string;
+    publicadoDe?: string;
+    publicadoAte?: string;
+    page?: number;
+    limit?: number;
+  },
+  token?: string,
+) {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set('q', params.q);
+  if (params?.situacao) qs.set('situacao', params.situacao);
+  if (params?.statusPublicacao) qs.set('statusPublicacao', params.statusPublicacao);
+  if (params?.etapaEditorial) qs.set('etapaEditorial', params.etapaEditorial);
+  if (params?.norma) qs.set('norma', params.norma);
+  if (params?.ementa) qs.set('ementa', params.ementa);
+  if (params?.publicadoDe) qs.set('publicadoDe', params.publicadoDe);
+  if (params?.publicadoAte) qs.set('publicadoAte', params.publicadoAte);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
+  const q = qs.toString();
+  return adminFetch<AdminListResponse>(`/admin/acts${q ? `?${q}` : ''}`, undefined, token);
 }
 
 export function createAct(payload: CreateActPayload, token?: string) {
@@ -228,6 +349,8 @@ export function createActEdition(id: string, token?: string) {
 
 export type ActAttachmentsBundle = {
   original: ActAttachment | null;
+  publicacao: ActAttachment | null;
+  historicoPublicacao?: ActAttachment[];
   topo: ActAttachment[];
   final: ActAttachment[];
   historico: ActAttachment[];
@@ -240,17 +363,32 @@ export function listActAttachments(actId: string, token?: string) {
 
 export async function uploadActOriginal(actId: string, file: File): Promise<ActAttachment> {
   const API_URL = getApiBaseUrl();
-  const token = readClientToken();
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_URL}/admin/acts/${actId}/attachments/original`, {
+  const res = await authorizedFetch(`${API_URL}/admin/acts/${actId}/attachments/original`, {
     method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
   });
+  if (res.status === 401) throw new AuthError('Não autenticado');
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message ?? 'Erro ao enviar arquivo original');
+  }
+  return res.json();
+}
+
+export async function uploadActPublication(actId: string, file: File): Promise<ActAttachment> {
+  const API_URL = getApiBaseUrl();
+  const form = new FormData();
+  form.append('file', file);
+  const res = await authorizedFetch(`${API_URL}/admin/acts/${actId}/attachments/publicacao`, {
+    method: 'POST',
+    body: form,
+  });
+  if (res.status === 401) throw new AuthError('Não autenticado');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message ?? 'Erro ao enviar arquivo da publicação');
   }
   return res.json();
 }
@@ -467,6 +605,7 @@ export interface ImportDetail {
       tipo: string | null;
       numero: number | null;
       ano: number | null;
+      dataAto?: string | null;
       ementa: string | null;
       tituloCompleto: string | null;
       confianca: number;
@@ -533,6 +672,7 @@ export function confirmImport(
     tipo?: string;
     numero?: number;
     ano?: number;
+    dataAto?: string;
     ementa?: string;
     orgaoOrigem?: string;
     efeitosAceitos?: string[];
@@ -592,6 +732,100 @@ export async function fetchActAttachmentFileUrl(
   if (!res.ok) throw new Error('Não foi possível carregar o arquivo original');
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+
+export type ArchiveImportItem = {
+  id: string;
+  nomeArquivo: string;
+  formato: string;
+  status: string;
+  tipo: string | null;
+  numero: number | null;
+  ano: number | null;
+  dataAto: string | null;
+  ementa: string | null;
+  confianca: number;
+  erroMensagem: string | null;
+  resolucao: string | null;
+  actId: string | null;
+  existingAct: { id: string; codigo: string; slug: string; ementa: string } | null;
+  fileUrl: string | null;
+};
+
+export type ArchiveImportBatch = {
+  id: string;
+  status: string;
+  criadoEm: string;
+  concluidoEm: string | null;
+  criadoPor: { id: string; nome: string; email: string } | null;
+  counts: Record<string, number>;
+  items: ArchiveImportItem[];
+};
+
+export async function uploadArchiveImportBatch(files: File[]): Promise<ArchiveImportBatch> {
+  const API_URL = getApiBaseUrl();
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+  const res = await authorizedFetch(`${API_URL}/admin/archive-imports/upload`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = Array.isArray(err.message) ? err.message.join(', ') : err.message;
+    throw new Error(msg ?? 'Erro no upload do acervo');
+  }
+  return res.json();
+}
+
+export function getArchiveImportBatch(batchId: string) {
+  return adminFetch<ArchiveImportBatch>(`/admin/archive-imports/${batchId}`);
+}
+
+export function updateArchiveImportItem(
+  batchId: string,
+  itemId: string,
+  patch: {
+    tipo?: string | null;
+    numero?: number | null;
+    ano?: number | null;
+    dataAto?: string | null;
+    ementa?: string | null;
+    resolucao?: 'ignore' | 'link' | 'create' | null;
+  },
+) {
+  return adminFetch<ArchiveImportBatch>(`/admin/archive-imports/${batchId}/items/${itemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function confirmArchiveImportBatch(batchId: string, itemIds: string[]) {
+  return adminFetch<{
+    batchId: string;
+    results: { itemId: string; ok: boolean; actId?: string; codigo?: string; error?: string }[];
+    batch: ArchiveImportBatch;
+  }>(`/admin/archive-imports/${batchId}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ itemIds }),
+  });
+}
+
+export async function getArchiveImportItemFileUrl(
+  batchId: string,
+  itemId: string,
+): Promise<string> {
+  const API_URL = getApiBaseUrl();
+  const res = await authorizedFetch(
+    `${API_URL}/admin/archive-imports/${batchId}/items/${itemId}/file`,
+  );
+  if (!res.ok) throw new Error('Não foi possível carregar o arquivo');
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export function startActStructuring(id: string, token?: string) {
+  return adminFetch<ActDetail>(`/admin/acts/${id}/start-structuring`, { method: 'POST' }, token);
 }
 
 export type { AdminListResponse };

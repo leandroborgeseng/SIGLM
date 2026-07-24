@@ -133,11 +133,25 @@ export function AdminSidebar() {
   );
 }
 
-export function AdminTopbar({ title, actions }: { title: string; actions?: React.ReactNode }) {
+export function AdminTopbar({
+  title,
+  actions,
+  sticky = false,
+}: {
+  title: string;
+  actions?: React.ReactNode;
+  /** Mantém o cabeçalho visível durante a rolagem do painel. */
+  sticky?: boolean;
+}) {
   const { toggle } = useAdminMenu();
 
   return (
-    <header className="flex min-h-[60px] flex-wrap items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 sm:px-6">
+    <header
+      className={cn(
+        'flex min-h-[60px] flex-wrap items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 sm:px-6',
+        sticky && 'sticky top-0 z-30 shrink-0 shadow-sm',
+      )}
+    >
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
@@ -150,7 +164,9 @@ export function AdminTopbar({ title, actions }: { title: string; actions?: React
         <LayoutDashboard className="hidden h-4 w-4 text-ink-4 sm:block" aria-hidden="true" />
         <h1 className="text-page-title truncate">{title}</h1>
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-2">{actions}</div>
+      )}
     </header>
   );
 }

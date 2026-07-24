@@ -11,6 +11,13 @@ export type ActSnapshot = {
     dataPublicacao: string | null;
     orgaoOrigem: string | null;
     orgaoOrigemId: string | null;
+    orgaoOrigemIds: string[];
+    meioPublicacaoId: string | null;
+    meioPublicacao: string | null;
+    atoConjunto: boolean;
+    prefixoTituloModo: string;
+    prefixoTitulo: string | null;
+    signatories: { signatoryId: string | null; nome: string; cargo: string; ordem: number }[];
     assunto: string | null;
     situacao: string;
     autoridadeSignataria: string | null;
@@ -65,6 +72,9 @@ export async function buildActSnapshot(
     where: { id: actId },
     include: {
       orgao: true,
+      meioPublicacao: true,
+      originOrgs: { orderBy: { ordem: 'asc' }, include: { orgao: true } },
+      signatories: { orderBy: { ordem: 'asc' } },
       units: { orderBy: { ordem: 'asc' } },
       attachments: { orderBy: [{ ordem: 'asc' }, { criadoEm: 'asc' }] },
     },
@@ -78,6 +88,9 @@ export async function buildActSnapshot(
         })
       : [];
 
+  const orgaoOrigemIds = act.originOrgs.map((l) => l.orgaoId);
+  const orgaoNomes = act.originOrgs.map((l) => l.orgao.nome);
+
   return {
     metadata: {
       tipo: act.tipo,
@@ -90,8 +103,20 @@ export async function buildActSnapshot(
           .trim() || act.ementa,
       dataAto: act.dataAto?.toISOString() ?? null,
       dataPublicacao: act.dataPublicacao?.toISOString() ?? null,
-      orgaoOrigem: act.orgao?.nome ?? act.orgaoOrigem,
+      orgaoOrigem: orgaoNomes.join('; ') || act.orgao?.nome || act.orgaoOrigem,
       orgaoOrigemId: act.orgaoOrigemId,
+      orgaoOrigemIds,
+      meioPublicacaoId: act.meioPublicacaoId,
+      meioPublicacao: act.meioPublicacao?.nome ?? null,
+      atoConjunto: act.atoConjunto,
+      prefixoTituloModo: act.prefixoTituloModo,
+      prefixoTitulo: act.prefixoTitulo,
+      signatories: act.signatories.map((s) => ({
+        signatoryId: s.signatoryId,
+        nome: s.nome,
+        cargo: s.cargo,
+        ordem: s.ordem,
+      })),
       assunto: act.assunto,
       situacao: act.situacao,
       autoridadeSignataria: act.autoridadeSignataria,

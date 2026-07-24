@@ -14,6 +14,7 @@ import {
   UNIT_TYPE_LABELS,
   validateUnitsHierarchy,
 } from '@/lib/unit-hierarchy';
+import { UnitTextEditor } from '@/components/admin/UnitTextEditor';
 import {
   DEFAULT_TEXTO_SIMPLES_FORMAT,
   type TextAlign,
@@ -261,10 +262,10 @@ export function EditUnitDialog({
               <label className="mb-1 block text-[12px] text-ink-3">
                 {isTextGroup ? 'Conteúdo' : 'Título'}
               </label>
-              <textarea
+              <UnitTextEditor
                 value={titulo}
-                onChange={(e) => setTitulo(e.target.value)}
-                className="min-h-[96px] w-full rounded-[10px] border border-line px-3.5 py-2 text-[13.5px] focus-ring"
+                onChange={setTitulo}
+                rows={isTextGroup ? 4 : 3}
               />
             </div>
           )}

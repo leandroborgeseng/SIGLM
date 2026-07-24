@@ -19,14 +19,64 @@ export class AdministrationController {
 
   @Post('organs')
   @RequirePermissions('users:manage')
-  createOrgan(@Body() body: { nome: string }) {
-    return this.admin.createOrgan(body.nome);
+  createOrgan(@Body() body: { nome: string; sigla?: string | null }) {
+    return this.admin.createOrgan(body.nome, body.sigla);
   }
 
   @Patch('organs/:id')
   @RequirePermissions('users:manage')
-  updateOrgan(@Param('id') id: string, @Body() body: { nome?: string; ativo?: boolean }) {
+  updateOrgan(
+    @Param('id') id: string,
+    @Body() body: { nome?: string; sigla?: string | null; ativo?: boolean },
+  ) {
     return this.admin.updateOrgan(id, body);
+  }
+
+  // ─── Meios de publicação ───────────────────────────────────────────────────
+
+  @Get('publication-media')
+  @RequirePermissions('acts:read')
+  listPublicationMedia(@Query('ativos') ativos?: string) {
+    return this.admin.listPublicationMedia(ativos !== 'true');
+  }
+
+  @Post('publication-media')
+  @RequirePermissions('users:manage')
+  createPublicationMedium(@Body() body: { nome: string }) {
+    return this.admin.createPublicationMedium(body.nome);
+  }
+
+  @Patch('publication-media/:id')
+  @RequirePermissions('users:manage')
+  updatePublicationMedium(
+    @Param('id') id: string,
+    @Body() body: { nome?: string; ativo?: boolean },
+  ) {
+    return this.admin.updatePublicationMedium(id, body);
+  }
+
+  // ─── Signatários ───────────────────────────────────────────────────────────
+
+  @Get('signatories')
+  @RequirePermissions('acts:read')
+  listSignatories(@Query('ativos') ativos?: string) {
+    return this.admin.listSignatories(ativos !== 'true');
+  }
+
+  @Post('signatories')
+  @RequirePermissions('users:manage')
+  createSignatory(@Body() body: { nome: string; cargo: string; orgaoId?: string | null }) {
+    return this.admin.createSignatory(body);
+  }
+
+  @Patch('signatories/:id')
+  @RequirePermissions('users:manage')
+  updateSignatory(
+    @Param('id') id: string,
+    @Body()
+    body: { nome?: string; cargo?: string; orgaoId?: string | null; ativo?: boolean },
+  ) {
+    return this.admin.updateSignatory(id, body);
   }
 
   // ─── Usuários ──────────────────────────────────────────────────────────────

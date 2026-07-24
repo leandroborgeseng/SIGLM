@@ -19,7 +19,6 @@ export function NewActButton() {
   const [form, setForm] = useState({
     tipo: 'lei' as ActType,
     numero: '',
-    ano: String(new Date().getFullYear()),
     dataAto: '',
     orgaoOrigemId: '',
   });
@@ -31,19 +30,24 @@ export function NewActButton() {
       .catch(() => undefined);
   }, [open]);
 
+  const anoDerivado = form.dataAto
+    ? new Date(form.dataAto).getUTCFullYear()
+    : new Date().getFullYear();
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.dataAto) {
+      toast('Informe a Data do ato', 'warn');
+      return;
+    }
     setLoading(true);
     try {
-      const ano = form.dataAto
-        ? new Date(form.dataAto).getUTCFullYear()
-        : Number(form.ano);
       const act = await createAct({
         tipo: form.tipo,
         numero: Number(form.numero),
-        ano,
+        ano: anoDerivado,
         ementa: 'Ementa pendente',
-        dataAto: form.dataAto || undefined,
+        dataAto: form.dataAto,
         orgaoOrigemId: form.orgaoOrigemId || undefined,
       });
       toast('Ato criado como rascunho', 'ok');
@@ -69,7 +73,7 @@ export function NewActButton() {
   const preview = formatFormalTitle(
     form.tipo,
     Number(form.numero) || 0,
-    form.dataAto ? new Date(form.dataAto).getUTCFullYear() : Number(form.ano) || new Date().getFullYear(),
+    anoDerivado,
     form.dataAto || null,
   );
 
@@ -94,49 +98,31 @@ export function NewActButton() {
               ))}
             </Select>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-[12px] text-ink-3">Número</label>
-              <Input
-                type="number"
-                required
-                min={1}
-                value={form.numero}
-                onChange={(e) => setForm({ ...form, numero: e.target.value })}
-                className="font-mono"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[12px] text-ink-3">Ano</label>
-              <Input
-                type="number"
-                required
-                min={1900}
-                value={form.ano}
-                onChange={(e) => setForm({ ...form, ano: e.target.value })}
-                className="font-mono"
-              />
-            </div>
+          <div>
+            <label className="mb-1 block text-[12px] text-ink-3">Número</label>
+            <Input
+              type="number"
+              required
+              min={1}
+              value={form.numero}
+              onChange={(e) => setForm({ ...form, numero: e.target.value })}
+              className="font-mono"
+            />
           </div>
           <div>
             <label className="mb-1 block text-[12px] text-ink-3">Data do ato</label>
             <Input
               type="date"
+              required
               value={form.dataAto}
-              onChange={(e) => {
-                const dataAto = e.target.value;
-                setForm({
-                  ...form,
-                  dataAto,
-                  ano: dataAto
-                    ? String(new Date(dataAto).getUTCFullYear())
-                    : form.ano,
-                });
-              }}
+              onChange={(e) => setForm({ ...form, dataAto: e.target.value })}
               className="font-mono"
             />
+            <p className="mt-1 text-[11px] text-ink-4">
+              O ano ({anoDerivado}) é obtido automaticamente a partir desta data.
+            </p>
           </div>
-          {form.numero && (
+          {form.numero && form.dataAto && (
             <p className="rounded-[8px] bg-surface-2 px-3 py-2 text-[12px] font-semibold uppercase text-ink">
               {preview}
             </p>
@@ -153,7 +139,7 @@ export function NewActButton() {
               <option value="">Selecione…</option>
               {organs.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.nome}
+                  {o.sigla ? `${o.sigla} — ${o.nome}` : o.nome}
                 </option>
               ))}
             </Select>

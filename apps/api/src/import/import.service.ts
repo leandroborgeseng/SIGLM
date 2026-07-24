@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ImportFormat, ImportStatus, Prisma, PublicationStatus, UnitType, EffectType, InclusaoPosicionamento, ActType } from '@prisma/client';
+import { ImportFormat, ImportStatus, Prisma, PublicationStatus, EditorialStage, UnitType, EffectType, InclusaoPosicionamento, ActType } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
@@ -418,6 +418,7 @@ export class ImportService {
         orgaoOrigemId,
         slug: buildActSlug(tipo, ano, numero),
         statusPublicacao: PublicationStatus.rascunho,
+        etapaEditorial: EditorialStage.em_estruturacao,
         units: {
           create: unitBlocks.map((b, i) => ({
             tipoUnidade: b.tipo as UnitType,
@@ -454,6 +455,12 @@ export class ImportService {
       },
       include: { units: { orderBy: { ordem: 'asc' } } },
     });
+
+    if (orgaoOrigemId) {
+      await this.prisma.actOriginOrg.create({
+        data: { actId: act.id, orgaoId: orgaoOrigemId, ordem: 0 },
+      });
+    }
 
     // Remapeia parentOrdem
     const ordemToId = new Map(act.units.map((u) => [u.ordem, u.id]));

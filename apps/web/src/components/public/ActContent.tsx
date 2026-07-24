@@ -6,7 +6,13 @@ import { FrancaBrasao } from '@/components/brand/FrancaBrasao';
 import { getApiBaseUrl } from '@/lib/api-url';
 import { cn, formatDate, formatFormalTitle } from '@/lib/format';
 import { formatacaoClassNames, sanitizeUnitHtml } from '@/lib/rich-text';
-import { unitIndentClass, UNIT_TYPE_LABELS } from '@/lib/unit-hierarchy';
+import {
+  unitAnchorId,
+  unitIndentClass,
+  unitTocDepth,
+  unitTocLabel,
+  UNIT_TYPE_LABELS,
+} from '@/lib/unit-hierarchy';
 import type { ActAttachment, ActDetail, NormativeUnit, UnitType } from '@/lib/types';
 
 function noteClass(nota: string | null): string {
@@ -58,7 +64,7 @@ function RichHtml({ html, className }: { html: string; className?: string }) {
   return (
     <span
       className={cn(
-        'whitespace-pre-wrap [&_a]:text-[#0066cc] [&_a]:underline hover:[&_a]:opacity-90',
+        '[&_a]:text-[#0066cc] [&_a]:underline hover:[&_a]:opacity-90',
         className,
       )}
       dangerouslySetInnerHTML={{ __html: safe }}
@@ -79,25 +85,6 @@ function sortUnitsForDisplay(units: NormativeUnit[]): NormativeUnit[] {
     if (wa !== wb) return wa - wb;
     return a.ordem - b.ordem;
   });
-}
-
-function MultiParagraph({ html, className }: { html: string; className?: string }) {
-  const parts = html
-    .split(/\n{2,}|\r\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (parts.length <= 1) {
-    return <RichHtml html={html} className={className} />;
-  }
-  return (
-    <>
-      {parts.map((part, i) => (
-        <p key={i} className={cn(i > 0 && 'mt-3', className)}>
-          <RichHtml html={part.replace(/\n/g, '<br/>')} />
-        </p>
-      ))}
-    </>
-  );
 }
 
 function UnitBlock({
@@ -124,8 +111,7 @@ function UnitBlock({
   }
 
   const indent = unitIndentClass(unit.tipoUnidade);
-  const anchorId =
-    unit.identificacao?.replace(/\s+/g, '-').toLowerCase() ?? `unit-${unit.ordem}`;
+  const anchorId = unitAnchorId(unit);
 
   if (isEmenta) {
     return (
@@ -161,7 +147,9 @@ function UnitBlock({
   if (isPreamble) {
     return (
       <article id={anchorId} className="mb-6 text-[15px] leading-[1.75] text-ink text-justify">
-        <MultiParagraph html={texto} />
+        <p>
+          <RichHtml html={texto} />
+        </p>
         {mode === 'consolidado' && unit.nota && (
           <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
         )}
@@ -221,6 +209,72 @@ function UnitBlock({
   );
 }
 
+/** Frase institucional (ticket 37) — gerada, não faz parte do Texto Estruturado. */
+function PublicationDisclaimer({ act }: { act: ActDetail }) {
+  const meio = act.meioPublicacao?.nome?.trim() || '';
+  const data = act.dataPublicacao ? formatDate(act.dataPublicacao) : '';
+  const file = act.arquivoPublicacao;
+  const API_URL = getApiBaseUrl();
+  let fileHref: string | null = null;
+  if (file?.downloadUrl) {
+    fileHref = file.downloadUrl.startsWith('http')
+      ? file.downloadUrl
+      : `${API_URL}${file.downloadUrl}`;
+  } else if (file?.href) {
+    fileHref = file.href;
+  }
+
+  const meioNode =
+    meio && fileHref ? (
+      <a
+        href={fileHref}
+        className="text-[#0066cc] underline hover:opacity-90"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {meio}
+      </a>
+    ) : meio ? (
+      meio
+    ) : null;
+
+  let content: React.ReactNode;
+  if (meio && data && data !== '—') {
+    content = (
+      <>
+        Este texto não substitui o publicado no {meioNode} em {data}.
+      </>
+    );
+  } else if (meio) {
+    content = <>Este texto não substitui o publicado no {meioNode}.</>;
+  } else if (data && data !== '—') {
+    content = <>Este texto não substitui o publicado em {data}.</>;
+  } else {
+    content = <>Este texto não substitui o publicado.</>;
+  }
+
+  return (
+    <p className="mt-8 text-[15px] leading-[1.75] text-[#c62828] print:text-[#c62828]">
+      {content}
+    </p>
+  );
+}
+
+function SignatoriesBlock({ act }: { act: ActDetail }) {
+  const list = act.signatarios ?? [];
+  if (list.length === 0) return null;
+  return (
+    <div className="mt-10 space-y-6">
+      {list.map((s) => (
+        <div key={s.id} className="text-center text-[15px] leading-[1.75] text-ink">
+          <p className="font-semibold">{s.nome}</p>
+          {s.cargo ? <p className="mt-0.5">{s.cargo}</p> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ActContent({ act }: { act: ActDetail }) {
   const [tab, setTab] = useState<'consolidado' | 'original' | 'historico'>('consolidado');
   const [tocOpen, setTocOpen] = useState(false);
@@ -228,9 +282,35 @@ export function ActContent({ act }: { act: ActDetail }) {
   const displayUnits = useMemo(() => sortUnitsForDisplay(act.units), [act.units]);
   const ementaUnit = displayUnits.find((u) => u.tipoUnidade === 'ementa');
   const bodyUnits = displayUnits.filter((u) => u.tipoUnidade !== 'ementa');
-  const articles = bodyUnits.filter((u) => u.tipoUnidade === 'artigo' && u.identificacao);
+  const tocUnits = useMemo(
+    () => displayUnits.filter((u) => unitTocLabel(u).trim().length > 0),
+    [displayUnits],
+  );
   const tituloFormal =
     act.tituloFormal ?? formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
+
+  const orgaos =
+    act.orgaosOrigem && act.orgaosOrigem.length > 0
+      ? act.orgaosOrigem.map((o) => o.nome)
+      : act.orgaoOrigem
+        ? [act.orgaoOrigem]
+        : [];
+
+  const structuredAvailable =
+    act.textoEstruturadoDisponivel !== undefined
+      ? act.textoEstruturadoDisponivel
+      : displayUnits.length > 0;
+  const fileOnlyPublic = !structuredAvailable;
+
+  const originalHref = (() => {
+    const file = act.arquivoOriginal;
+    if (!file?.downloadUrl && !file?.href) return null;
+    const API_URL = getApiBaseUrl();
+    if (file.href && /^https?:\/\//i.test(file.href)) return file.href;
+    if (file.downloadUrl?.startsWith('http')) return file.downloadUrl;
+    if (file.downloadUrl) return `${API_URL}${file.downloadUrl}`;
+    return file.href ?? null;
+  })();
 
   return (
     <div className="bg-white text-ink">
@@ -240,10 +320,10 @@ export function ActContent({ act }: { act: ActDetail }) {
           {act.codigo}
           <span className="mx-1.5">·</span>
           {act.situacao.replace(/_/g, ' ')}
-          {act.orgaoOrigem ? (
+          {orgaos.length > 0 ? (
             <>
               <span className="mx-1.5">·</span>
-              {act.orgaoOrigem}
+              {orgaos.join(' / ')}
             </>
           ) : null}
           <span className="mx-1.5">·</span>
@@ -252,7 +332,7 @@ export function ActContent({ act }: { act: ActDetail }) {
           Pub.: {formatDate(act.dataPublicacao)}
         </p>
 
-        {tab !== 'historico' && articles.length > 0 && (
+        {!fileOnlyPublic && tab !== 'historico' && tocUnits.length > 0 && (
           <div>
             <button
               type="button"
@@ -267,18 +347,27 @@ export function ActContent({ act }: { act: ActDetail }) {
               />
             </button>
             {tocOpen && (
-              <ul className="mt-3 space-y-1 pl-1">
-                {articles.map((u) => (
-                  <li key={u.id}>
-                    <a
-                      href={`#${u.identificacao?.replace(/\s+/g, '-').toLowerCase()}`}
-                      className="text-[14px] text-brand hover:underline"
-                    >
-                      {u.identificacao}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+              <nav
+                className="mt-3 max-h-[min(40vh,280px)] overflow-y-auto overscroll-contain rounded-[10px] border border-line/70 bg-surface-2/40 py-2 pr-1 sm:max-h-[min(36vh,320px)]"
+                aria-label="Sumário do ato"
+              >
+                <ul className="space-y-0.5">
+                  {tocUnits.map((u) => {
+                    const depth = unitTocDepth(u, displayUnits);
+                    return (
+                      <li key={u.id} style={{ paddingLeft: `${depth * 12}px` }}>
+                        <a
+                          href={`#${unitAnchorId(u)}`}
+                          className="block rounded px-2 py-1 text-[13.5px] text-brand hover:bg-brand/5 hover:underline"
+                          onClick={() => setTocOpen(false)}
+                        >
+                          {unitTocLabel(u)}
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </nav>
             )}
           </div>
         )}
@@ -291,11 +380,14 @@ export function ActContent({ act }: { act: ActDetail }) {
             <p className="text-[14px] font-semibold tracking-wide text-ink sm:text-[15px]">
               Prefeitura Municipal de Franca/SP
             </p>
-            {act.orgaoOrigem ? (
-              <p className="mt-0.5 text-[12.5px] font-medium text-ink-2 sm:text-[13px]">
-                {act.orgaoOrigem}
+            {orgaos.map((nome) => (
+              <p
+                key={nome}
+                className="mt-0.5 text-[12.5px] font-medium text-ink-2 sm:text-[13px]"
+              >
+                {nome}
               </p>
-            ) : null}
+            ))}
           </div>
         </div>
 
@@ -306,8 +398,8 @@ export function ActContent({ act }: { act: ActDetail }) {
         {tab !== 'historico' && ementaUnit ? (
           <UnitBlock unit={ementaUnit} mode={tab} />
         ) : tab !== 'historico' && act.ementa ? (
-          <p className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] whitespace-pre-wrap text-left text-[14.5px] leading-relaxed text-ink sm:w-[min(100%,50%)]">
-            {act.ementa}
+          <p className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] text-left text-[14.5px] leading-relaxed text-ink sm:w-[min(100%,50%)]">
+            <RichHtml html={act.ementa} />
           </p>
         ) : null}
 
@@ -322,31 +414,61 @@ export function ActContent({ act }: { act: ActDetail }) {
         )}
       </header>
 
-      <div className="min-w-0">
-        {tab === 'historico' ? (
-          <ol className="relative space-y-5 border-l border-line pl-5">
-            <li>
-              <p className="text-[12px] text-ink-3">{formatDate(act.dataPublicacao)}</p>
-              <p className="mt-0.5 font-medium text-ink">Publicação original</p>
-              <p className="text-[14px] text-ink-2">{act.codigo}</p>
-            </li>
-            {act.history.map((h) => (
-              <li key={h.id}>
-                <p className="text-[12px] text-ink-3">{formatDate(h.data)}</p>
-                <p className="mt-0.5 font-medium text-ink">{h.nota ?? h.tipoAlteracao}</p>
-                {h.dispositivo && (
-                  <p className="text-[13px] text-ink-2">Dispositivo: {h.dispositivo}</p>
-                )}
-                {h.normaAlteradora && (
-                  <p className="text-[13px] text-brand">{h.normaAlteradora.codigo}</p>
-                )}
+      {fileOnlyPublic ? (
+        <section className="min-w-0 rounded-[12px] border border-line/70 bg-surface-2/30 px-5 py-6">
+          <p className="text-[14.5px] leading-relaxed text-ink-2">
+            O texto estruturado ainda não está disponível para consulta. O conteúdo oficial deste
+            ato pode ser acessado pelo arquivo original.
+          </p>
+          {originalHref ? (
+            <p className="mt-4">
+              <a
+                href={originalHref}
+                className="inline-flex text-[15px] font-semibold text-[#0066cc] underline hover:opacity-90"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Acessar arquivo original do ato
+              </a>
+            </p>
+          ) : (
+            <p className="mt-4 text-[13px] text-ink-3">Arquivo original indisponível no momento.</p>
+          )}
+        </section>
+      ) : (
+        <div className="min-w-0">
+          {tab === 'historico' ? (
+            <ol className="relative space-y-5 border-l border-line pl-5">
+              <li>
+                <p className="text-[12px] text-ink-3">{formatDate(act.dataPublicacao)}</p>
+                <p className="mt-0.5 font-medium text-ink">Publicação original</p>
+                <p className="text-[14px] text-ink-2">{act.codigo}</p>
               </li>
-            ))}
-          </ol>
-        ) : (
-          bodyUnits.map((unit) => <UnitBlock key={unit.id} unit={unit} mode={tab} />)
-        )}
-      </div>
+              {act.history.map((h) => (
+                <li key={h.id}>
+                  <p className="text-[12px] text-ink-3">{formatDate(h.data)}</p>
+                  <p className="mt-0.5 font-medium text-ink">{h.nota ?? h.tipoAlteracao}</p>
+                  {h.dispositivo && (
+                    <p className="text-[13px] text-ink-2">Dispositivo: {h.dispositivo}</p>
+                  )}
+                  {h.normaAlteradora && (
+                    <p className="text-[13px] text-brand">{h.normaAlteradora.codigo}</p>
+                  )}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            bodyUnits.map((unit) => <UnitBlock key={unit.id} unit={unit} mode={tab} />)
+          )}
+        </div>
+      )}
+
+      {!fileOnlyPublic && tab !== 'historico' && (
+        <>
+          <SignatoriesBlock act={act} />
+          <PublicationDisclaimer act={act} />
+        </>
+      )}
 
       <section className="mt-10 space-y-2 border-t border-line pt-6">
         {(act.anexosFinal?.length ?? 0) > 0 && (
@@ -358,7 +480,7 @@ export function ActContent({ act }: { act: ActDetail }) {
             ))}
           </ul>
         )}
-        {act.arquivoOriginal?.downloadUrl && (
+        {!fileOnlyPublic && act.arquivoOriginal?.downloadUrl && (
           <p>
             <SupplementLink
               item={{
@@ -370,34 +492,36 @@ export function ActContent({ act }: { act: ActDetail }) {
         )}
       </section>
 
-      <section className="no-print mt-8 border-t border-line pt-6">
-        <p className="mb-3 text-[12px] font-medium uppercase tracking-wide text-ink-3">
-          Versões e histórico
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              { id: 'consolidado', label: 'Texto consolidado' },
-              { id: 'original', label: 'Texto original' },
-              { id: 'historico', label: 'Histórico de alterações' },
-            ] as const
-          ).map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => setTab(opt.id)}
-              className={cn(
-                'rounded border px-3 py-1.5 text-[13px] transition-colors',
-                tab === opt.id
-                  ? 'border-brand bg-brand-soft text-brand'
-                  : 'border-line text-ink-2 hover:border-brand/40',
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </section>
+      {!fileOnlyPublic && (
+        <section className="no-print mt-8 border-t border-line pt-6">
+          <p className="mb-3 text-[12px] font-medium uppercase tracking-wide text-ink-3">
+            Versões e histórico
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                { id: 'consolidado', label: 'Texto consolidado' },
+                { id: 'original', label: 'Texto original' },
+                { id: 'historico', label: 'Histórico de alterações' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setTab(opt.id)}
+                className={cn(
+                  'rounded border px-3 py-1.5 text-[13px] transition-colors',
+                  tab === opt.id
+                    ? 'border-brand bg-brand-soft text-brand'
+                    : 'border-line text-ink-2 hover:border-brand/40',
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

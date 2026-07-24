@@ -448,3 +448,43 @@ export function unitTreeLabel(unit: NormativeUnit, units: NormativeUnit[]): stri
   const id = unit.identificacao ?? UNIT_TYPE_LABELS[unit.tipoUnidade];
   return `${pad}${id} (${UNIT_TYPE_LABELS[unit.tipoUnidade]})`;
 }
+
+/** Âncora estável para navegação pública / sumário. */
+export function unitAnchorId(unit: Pick<NormativeUnit, 'id' | 'identificacao' | 'ordem'>): string {
+  if (unit.identificacao?.trim()) {
+    return unit.identificacao.replace(/\s+/g, '-').toLowerCase();
+  }
+  return `unit-${unit.ordem}-${unit.id.slice(0, 8)}`;
+}
+
+/**
+ * Rótulo curto e compreensível para o sumário público.
+ * Prefere identificação; senão tipo + trecho do texto.
+ */
+export function unitTocLabel(unit: NormativeUnit): string {
+  const ident = unit.identificacao?.trim();
+  if (ident) return ident;
+
+  const typeLabel = UNIT_TYPE_LABELS[unit.tipoUnidade];
+  if (
+    unit.tipoUnidade === 'ementa' ||
+    unit.tipoUnidade === 'preambulo' ||
+    unit.tipoUnidade === 'considerando'
+  ) {
+    return typeLabel;
+  }
+
+  const plain = (unit.texto || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!plain) return typeLabel;
+  const snippet = plain.length > 48 ? `${plain.slice(0, 48).trim()}…` : plain;
+  if (unit.tipoUnidade === 'texto_simples') return snippet;
+  return `${typeLabel}: ${snippet}`;
+}
+
+/** Nível visual do sumário (0–6), com base na hierarquia pai→filho. */
+export function unitTocDepth(unit: NormativeUnit, units: NormativeUnit[]): number {
+  return Math.min(unitParentDepth(unit, units), 6);
+}

@@ -13,7 +13,14 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { ActSituacao, ActType, EffectType, InclusaoPosicionamento, UnitType } from '@prisma/client';
+import {
+  ActSituacao,
+  ActType,
+  EditorialStage,
+  EffectType,
+  InclusaoPosicionamento,
+  UnitType,
+} from '@prisma/client';
 
 export class UnitFormatacaoDto {
   @IsOptional()
@@ -35,6 +42,24 @@ export class UnitFormatacaoDto {
   @IsOptional()
   @IsIn(['normal', 'expanded'])
   letterSpacing?: 'normal' | 'expanded';
+}
+
+export class ActSignatoryInputDto {
+  @IsOptional()
+  @IsString()
+  signatoryId?: string | null;
+
+  @IsString()
+  @MinLength(1)
+  nome!: string;
+
+  @IsString()
+  @MinLength(1)
+  cargo!: string;
+
+  @IsInt()
+  @Min(0)
+  ordem!: number;
 }
 
 export class CreateActDto {
@@ -73,6 +98,33 @@ export class CreateActDto {
   @IsOptional()
   @IsString()
   orgaoOrigemId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  orgaoOrigemIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  meioPublicacaoId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  atoConjunto?: boolean;
+
+  @IsOptional()
+  @IsIn(['none', 'auto', 'manual'])
+  prefixoTituloModo?: 'none' | 'auto' | 'manual';
+
+  @IsOptional()
+  @IsString()
+  prefixoTitulo?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ActSignatoryInputDto)
+  signatories?: ActSignatoryInputDto[];
 
   @IsOptional()
   @IsString()
@@ -115,6 +167,33 @@ export class UpdateActDto {
   orgaoOrigemId?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  orgaoOrigemIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  meioPublicacaoId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  atoConjunto?: boolean;
+
+  @IsOptional()
+  @IsIn(['none', 'auto', 'manual'])
+  prefixoTituloModo?: 'none' | 'auto' | 'manual';
+
+  @IsOptional()
+  @IsString()
+  prefixoTitulo?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ActSignatoryInputDto)
+  signatories?: ActSignatoryInputDto[];
+
+  @IsOptional()
   @IsString()
   autoridadeSignataria?: string;
 
@@ -126,6 +205,10 @@ export class UpdateActDto {
   @IsOptional()
   @IsString()
   observacoesInternas?: string;
+
+  @IsOptional()
+  @IsEnum(EditorialStage)
+  etapaEditorial?: EditorialStage;
 }
 
 export class UnitInputDto {

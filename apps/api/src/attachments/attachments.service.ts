@@ -81,6 +81,8 @@ export class AttachmentsService {
       original: mapped.find(
         (a) => a.ativo && ORIGINAL_TYPES.includes(a.tipo as AttachmentType),
       ) ?? null,
+      publicacao:
+        mapped.find((a) => a.ativo && a.tipo === AttachmentType.arquivo_publicacao) ?? null,
       topo: mapped.filter((a) => a.ativo && a.tipo === AttachmentType.anexo_topo),
       final: mapped.filter((a) => a.ativo && a.tipo === AttachmentType.anexo_final),
       historico: mapped.filter((a) => a.tipo === AttachmentType.arquivo_historico || !a.ativo),
@@ -145,6 +147,54 @@ export class AttachmentsService {
       resumo: existing
         ? `Substituiu arquivo original (${existing.nome} → ${stored.nome})`
         : `Anexou arquivo original (${stored.nome})`,
+      withSnapshot: true,
+    });
+
+    return this.mapAttachment(created);
+  }
+
+  async uploadPublicationFile(actId: string, file: Express.Multer.File, userId?: string) {
+    const act = await this.ensureAct(actId);
+    this.assertEditable(act);
+    if (!file) throw new BadRequestException('Arquivo obrigatório');
+
+    const stored = await this.storeFile(actId, file);
+    const existing = await this.prisma.attachment.findFirst({
+      where: { actId, ativo: true, tipo: AttachmentType.arquivo_publicacao },
+    });
+
+    if (existing) {
+      await this.prisma.attachment.update({
+        where: { id: existing.id },
+        data: {
+          tipo: AttachmentType.arquivo_historico,
+          ativo: false,
+          substituidoEm: new Date(),
+        },
+      });
+    }
+
+    const created = await this.prisma.attachment.create({
+      data: {
+        actId,
+        tipo: AttachmentType.arquivo_publicacao,
+        url: stored.url,
+        nome: stored.nome,
+        titulo: 'Arquivo da publicação oficial',
+        tamanho: stored.tamanho,
+        hash: stored.hash,
+        ordem: 0,
+        ativo: true,
+      },
+    });
+
+    await recordInternalHistory(this.prisma, {
+      actId,
+      userId,
+      acao: existing ? 'substituir_arquivo_publicacao' : 'anexar_arquivo_publicacao',
+      resumo: existing
+        ? `Substituiu arquivo de publicação (${existing.nome} → ${stored.nome})`
+        : `Anexou arquivo de publicação (${stored.nome})`,
       withSnapshot: true,
     });
 

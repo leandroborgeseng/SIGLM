@@ -3,7 +3,13 @@ import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
-import { formatActCode, formatFormalTitle, SITUACAO_LABELS, parseSlug } from '../normative-acts/normative-acts.utils';
+import {
+  formatActCode,
+  formatFormalTitle,
+  resolveTituloPrefixo,
+  SITUACAO_LABELS,
+  parseSlug,
+} from '../normative-acts/normative-acts.utils';
 import { renderConsolidatedHtml, sortUnitsForDisplay, unitHtmlToPlainText, type ExportAct } from './act-html.renderer';
 import { parseFormatacao } from '../common/rich-text.utils';
 
@@ -29,6 +35,13 @@ export class ExportService {
     const act = await this.prisma.normativeAct.findFirst({
       where: { slug: slugPath, statusPublicacao: 'publicado' },
       include: {
+        meioPublicacao: true,
+        originOrgs: { orderBy: { ordem: 'asc' }, include: { orgao: true } },
+        signatories: { orderBy: { ordem: 'asc' } },
+        attachments: {
+          where: { ativo: true, tipo: 'arquivo_publicacao' },
+          take: 1,
+        },
         units: { orderBy: { ordem: 'asc' } },
         changesAsAlterada: {
           include: { unit: { select: { id: true } } },
@@ -43,6 +56,12 @@ export class ExportService {
         .map((c) => [c.unitId!, c.notaGerada]),
     );
 
+    const orgaosOrigem = act.originOrgs.map((l) => ({
+      nome: l.orgao.nome,
+      sigla: l.orgao.sigla,
+    }));
+    const arquivoPublicacao = act.attachments[0];
+
     return {
       tipo: act.tipo,
       numero: act.numero,
@@ -50,9 +69,25 @@ export class ExportService {
       ementa: act.ementa,
       situacao: act.situacao,
       assunto: act.assunto,
-      orgaoOrigem: act.orgaoOrigem,
+      orgaoOrigem:
+        orgaosOrigem.map((o) => o.nome).join('; ') || act.orgaoOrigem,
       dataAto: act.dataAto,
       dataPublicacao: act.dataPublicacao,
+      atoConjunto: act.atoConjunto,
+      prefixoTituloModo: act.prefixoTituloModo,
+      prefixoTitulo: act.prefixoTitulo,
+      orgaosOrigem,
+      meioPublicacao: act.meioPublicacao
+        ? { id: act.meioPublicacao.id, nome: act.meioPublicacao.nome }
+        : null,
+      arquivoPublicacaoUrl: arquivoPublicacao
+        ? `/public/attachments/${arquivoPublicacao.id}/file`
+        : null,
+      signatarios: act.signatories.map((s) => ({
+        nome: s.nome,
+        cargo: s.cargo,
+        ordem: s.ordem,
+      })),
       codigo: formatActCode(act.tipo, act.numero, act.ano),
       units: act.units.map((u) => ({
         tipoUnidade: u.tipoUnidade,
@@ -136,7 +171,15 @@ export class ExportService {
       doc.y = Math.max(doc.y, headerTop + brasaoH) + 12;
       doc.x = doc.page.margins.left;
 
-      const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto);
+      const prefixo = resolveTituloPrefixo(
+        act.prefixoTituloModo,
+        act.prefixoTitulo,
+        act.orgaosOrigem ?? [],
+      );
+      const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto, {
+        atoConjunto: act.atoConjunto,
+        prefixo,
+      });
       doc.font('serif-bold').fontSize(13).fillColor('#0F1B2D').text(tituloFormal, { align: 'center' });
       doc.moveDown(0.6);
       const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;

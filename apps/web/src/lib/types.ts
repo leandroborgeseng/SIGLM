@@ -134,6 +134,27 @@ export interface ActAttachment {
   substituidoEm?: string | null;
 }
 
+export interface ActOriginOrgRef {
+  id: string;
+  nome: string;
+  sigla?: string | null;
+  ordem?: number;
+}
+
+export interface ActSignatoryRef {
+  id: string;
+  signatoryId?: string | null;
+  nome: string;
+  cargo: string;
+  ordem: number;
+}
+
+export interface PublicationMediumRef {
+  id: string;
+  nome: string;
+  ativo?: boolean;
+}
+
 export interface ActDetail extends ActSummary {
   dataAto: string | null;
   palavrasChave: string[];
@@ -142,8 +163,18 @@ export interface ActDetail extends ActSummary {
   history: ActHistoryItem[];
   attachments: ActAttachment[];
   arquivoOriginal?: ActAttachment | null;
+  arquivoPublicacao?: ActAttachment | null;
   anexosTopo?: ActAttachment[];
   anexosFinal?: ActAttachment[];
+  meioPublicacao?: PublicationMediumRef | null;
+  meioPublicacaoId?: string | null;
+  orgaosOrigem?: ActOriginOrgRef[];
+  signatarios?: ActSignatoryRef[];
+  atoConjunto?: boolean;
+  prefixoTituloModo?: 'none' | 'auto' | 'manual';
+  prefixoTitulo?: string | null;
+  etapaEditorial?: string;
+  textoEstruturadoDisponivel?: boolean;
 }
 
 export interface SearchResponse {
@@ -171,11 +202,13 @@ export interface AdminKpis {
 
 export interface AdminAct extends ActSummary {
   statusPublicacao: string;
+  etapaEditorial?: string;
   updatedAt: string;
 }
 
 export interface AdminActDetail extends ActDetail {
   statusPublicacao?: string;
+  etapaEditorial?: string;
   editionOpen?: boolean;
   hierarchyValid?: boolean;
   observacoesInternas?: string | null;

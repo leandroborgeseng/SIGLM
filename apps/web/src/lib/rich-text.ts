@@ -1,5 +1,7 @@
 /**
- * HTML permitido nos textos das unidades: <a> e quebras de linha (<br> / \n).
+ * HTML permitido nos textos das unidades: <a> e quebras de linha (<br>).
+ * Forma canônica: apenas `<br>` (sem `\n` acompanhando), para não duplicar
+ * quebras com `whitespace-pre-wrap` nem a cada ciclo salvar/reabrir.
  */
 
 export type TextAlign = 'left' | 'center' | 'right' | 'justify';
@@ -33,6 +35,7 @@ export function escapeHtml(value: string): string {
 export function htmlBlockToNewlines(value: string): string {
   return value
     .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
     .replace(/<(p|div|h[1-6]|li|tr)(\s[^>]*)?>/gi, '')
@@ -48,30 +51,39 @@ export function stripHtmlTags(value: string): string {
     .replace(/&quot;/g, '"')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')
+    // Não colapsar \n\n — linhas em branco intencionais devem sobreviver.
     .replace(/\n{3,}/g, '\n\n');
 }
 
 export function sanitizeHref(url: string): string | null {
-  const t = url.trim();
+  let t = url.trim();
   if (!t) return null;
   if (t.startsWith('/')) return t;
   if (/^https?:\/\//i.test(t)) return t;
   if (/^mailto:/i.test(t)) return t;
-  return null;
+  if (/^www\./i.test(t)) t = `https://${t}`;
+  else if (
+    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+([/?#][^\s]*)?$/i.test(t)
+  ) {
+    t = `https://${t}`;
+  } else {
+    return null;
+  }
+  return /^https?:\/\//i.test(t) ? t : null;
 }
 
 /**
- * Escapa texto preservando \n como <br>, mantendo apenas âncoras seguras.
- * Assim o conteúdo sobrevive a contentEditable, HTML público e PDF.
+ * Escapa texto preservando quebras exatamente uma vez como `<br>`.
+ * Idempotente: sanitize(sanitize(x)) === sanitize(x).
  */
 export function sanitizeUnitHtml(input: string): string {
   if (!input) return '';
 
   const normalizePlain = (text: string) =>
-    escapeHtml(text).replace(/\n/g, '<br>\n');
+    escapeHtml(text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')).replace(/\n/g, '<br>');
 
   if (!/<[a-z/]/i.test(input)) {
-    return normalizePlain(input.replace(/\r\n/g, '\n'));
+    return normalizePlain(input);
   }
 
   const parts: string[] = [];
@@ -94,7 +106,7 @@ export function sanitizeUnitHtml(input: string): string {
     last = match.index + match[0].length;
   }
   parts.push(normalizePlain(stripHtmlTags(input.slice(last))));
-  return parts.join('').replace(/(?:<br>\n?){3,}/g, '<br>\n<br>\n');
+  return parts.join('');
 }
 
 /** Texto puro (PDF / busca), preservando quebras. */
@@ -102,7 +114,7 @@ export function unitHtmlToPlainText(input: string): string {
   return stripHtmlTags(input);
 }
 
-/** Para contentEditable: garante que \n do banco vire <br> visível. */
+/** Para contentEditable: forma canônica idêntica ao armazenamento. */
 export function unitTextToEditorHtml(input: string): string {
   return sanitizeUnitHtml(input || '');
 }

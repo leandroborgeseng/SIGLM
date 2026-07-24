@@ -18,7 +18,7 @@ export class OcrService {
   private readonly logger = new Logger(OcrService.name);
   private readonly cachePath = path.join(process.cwd(), '.tesseract-cache');
 
-  async processPdf(filePath: string): Promise<OcrPageResult[]> {
+  async processPdf(filePath: string, opts?: { maxPages?: number }): Promise<OcrPageResult[]> {
     try {
       await fs.access(filePath);
     } catch {
@@ -39,12 +39,14 @@ export class OcrService {
     });
 
     let pagina = 0;
+    const maxPages = opts?.maxPages && opts.maxPages > 0 ? opts.maxPages : undefined;
 
     try {
       const document = await pdf(filePath, { scale: 2 });
 
       for await (const image of document) {
         pagina++;
+        if (maxPages && pagina > maxPages) break;
         this.logger.log(`OCR página ${pagina}/${document.length}...`);
 
         const { data } = await worker.recognize(image);

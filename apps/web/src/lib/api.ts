@@ -70,13 +70,29 @@ export function getActBySlug(tipo: string, ano: string, numero: string) {
 }
 
 export function getAdminActs(
-  params?: { q?: string; situacao?: string; page?: number },
+  params?: {
+    q?: string;
+    situacao?: string;
+    statusPublicacao?: string;
+    norma?: string;
+    ementa?: string;
+    publicadoDe?: string;
+    publicadoAte?: string;
+    page?: number;
+    limit?: number;
+  },
   token?: string,
 ) {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
   if (params?.situacao) qs.set('situacao', params.situacao);
+  if (params?.statusPublicacao) qs.set('statusPublicacao', params.statusPublicacao);
+  if (params?.norma) qs.set('norma', params.norma);
+  if (params?.ementa) qs.set('ementa', params.ementa);
+  if (params?.publicadoDe) qs.set('publicadoDe', params.publicadoDe);
+  if (params?.publicadoAte) qs.set('publicadoAte', params.publicadoAte);
   if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
   return fetchApi<AdminListResponse>(`/admin/acts?${qs}`, {
     headers: authHeaders(token),
   });

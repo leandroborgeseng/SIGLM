@@ -13,6 +13,7 @@ export function HyperlinkDialog({
   open,
   initialUrl = '',
   selectedText,
+  applyError = '',
   onClose,
   onApply,
   onRemove,
@@ -21,6 +22,7 @@ export function HyperlinkDialog({
   open: boolean;
   initialUrl?: string;
   selectedText: string;
+  applyError?: string;
   onClose: () => void;
   onApply: (url: string) => void;
   onRemove?: () => void;
@@ -132,8 +134,8 @@ export function HyperlinkDialog({
                     onClick={() => {
                       const href = actUrl(act.slug);
                       setUrl(href);
+                      // applyLink fecha o diálogo em sucesso; mantém aberto se falhar.
                       onApply(href);
-                      onClose();
                     }}
                   >
                     <p className="text-[12.5px] font-semibold text-brand">{act.codigo}</p>
@@ -144,6 +146,12 @@ export function HyperlinkDialog({
             </ul>
           </div>
         )}
+
+        {applyError ? (
+          <p className="mt-3 rounded-[8px] border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+            {applyError}
+          </p>
+        ) : null}
 
         <div className="mt-5 flex flex-wrap justify-between gap-2">
           <div className="flex flex-wrap gap-1">
@@ -156,7 +164,7 @@ export function HyperlinkDialog({
             {onRemove && initialUrl && (
               <Button variant="ghost" size="sm" onClick={onRemove}>
                 <Unlink className="h-3.5 w-3.5" />
-                Remover link
+                Remover hiperlink
               </Button>
             )}
           </div>
@@ -167,13 +175,13 @@ export function HyperlinkDialog({
             {mode === 'url' && (
               <Button
                 size="sm"
-                disabled={!canApply || !selectedText}
+                disabled={!canApply || !selectedText.trim()}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   const href = sanitizeHref(url);
                   if (!href) return;
+                  // Não fecha aqui: applyLink fecha em sucesso e mantém aberto se falhar.
                   onApply(href);
-                  onClose();
                 }}
               >
                 <Link2 className="h-3.5 w-3.5" />

@@ -34,6 +34,26 @@ export const SITUACOES: ActSituacao[] = [
   'revogado',
 ];
 
+export type EditorialStage =
+  | 'somente_arquivo_original'
+  | 'em_estruturacao'
+  | 'aguardando_revisao'
+  | 'estruturado';
+
+export const ETAPA_EDITORIAL_LABELS: Record<EditorialStage, string> = {
+  somente_arquivo_original: 'Somente arquivo original',
+  em_estruturacao: 'Em estruturação',
+  aguardando_revisao: 'Aguardando revisão',
+  estruturado: 'Estruturado',
+};
+
+export const ETAPAS_EDITORIAIS: EditorialStage[] = [
+  'somente_arquivo_original',
+  'em_estruturacao',
+  'aguardando_revisao',
+  'estruturado',
+];
+
 export function formatDate(date: string | null | undefined): string {
   if (!date) return '—';
   return new Date(date).toLocaleDateString('pt-BR', {
@@ -59,15 +79,25 @@ const MONTHS_PT = [
   'DEZEMBRO',
 ] as const;
 
-/** Título formal: "DECRETO Nº 10.766, DE 16 DE MAIO DE 2018". */
+export type FormalTitleOptions = {
+  atoConjunto?: boolean;
+  /** Prefixo já resolvido (manual ou auto com siglas). */
+  prefixo?: string | null;
+};
+
+/** Título formal: "{TIPO}[ CONJUNTA][ {PREFIXO}] Nº {n}, DE {data}". */
 export function formatFormalTitle(
   tipo: ActType,
   numero: number,
   ano: number,
   dataAto?: string | null,
+  options?: FormalTitleOptions,
 ): string {
   const typeLabel = ACT_TYPE_LABELS[tipo].toUpperCase();
   const num = numero.toLocaleString('pt-BR');
+  const conjunto = options?.atoConjunto ? ' CONJUNTA' : '';
+  const prefixo = options?.prefixo?.trim() ? ` ${options.prefixo.trim().toUpperCase()}` : '';
+  const head = `${typeLabel}${conjunto}${prefixo}`;
 
   if (dataAto) {
     const d = new Date(dataAto);
@@ -75,11 +105,30 @@ export function formatFormalTitle(
       const day = d.getUTCDate();
       const month = MONTHS_PT[d.getUTCMonth()];
       const year = d.getUTCFullYear();
-      return `${typeLabel} Nº ${num}, DE ${day} DE ${month} DE ${year}`;
+      return `${head} Nº ${num}, DE ${day} DE ${month} DE ${year}`;
     }
   }
 
-  return `${typeLabel} Nº ${num}, DE ${ano}`;
+  return `${head} Nº ${num}, DE ${ano}`;
+}
+
+/** Resolve prefixo do título conforme modo (none | auto | manual). */
+export function resolveTituloPrefixo(
+  modo: string | null | undefined,
+  prefixoManual: string | null | undefined,
+  orgs: { sigla?: string | null; nome?: string | null }[],
+): string | null {
+  if (modo === 'manual') {
+    const p = prefixoManual?.trim();
+    return p || null;
+  }
+  if (modo === 'auto') {
+    const parts = orgs
+      .map((o) => o.sigla?.trim() || o.nome?.trim())
+      .filter((v): v is string => Boolean(v));
+    return parts.length ? parts.join('/') : null;
+  }
+  return null;
 }
 
 export function toDateInputValue(date: string | null | undefined): string {

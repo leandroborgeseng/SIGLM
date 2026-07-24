@@ -21,6 +21,7 @@ import {
   reorderActSupplements,
   updateActSupplement,
   uploadActOriginal,
+  uploadActPublication,
   type ActAttachmentsBundle,
 } from '@/lib/admin-api';
 import { getApiBaseUrl } from '@/lib/api-url';
@@ -328,23 +329,30 @@ export function ActMetadataAttachments({
   actId,
   editable,
   onOriginalChange,
+  showPublication = true,
+  onPublicationChange,
 }: {
   actId: string;
   editable: boolean;
   onOriginalChange?: (original: ActAttachment | null) => void;
+  /** Exibe a seção de arquivo da publicação (padrão: true; opcional). */
+  showPublication?: boolean;
+  onPublicationChange?: (publicacao: ActAttachment | null) => void;
 }) {
   const { toast } = useToast();
   const [bundle, setBundle] = useState<ActAttachmentsBundle | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadingPub, setUploadingPub] = useState(false);
 
   const reload = useCallback(() => {
     listActAttachments(actId)
       .then((b) => {
         setBundle(b);
         onOriginalChange?.(b.original);
+        onPublicationChange?.(b.publicacao ?? null);
       })
       .catch(() => undefined);
-  }, [actId, onOriginalChange]);
+  }, [actId, onOriginalChange, onPublicationChange]);
 
   useEffect(() => {
     reload();
@@ -367,8 +375,27 @@ export function ActMetadataAttachments({
     }
   };
 
+  const onUploadPublication = async (file: File | null) => {
+    if (!file) return;
+    setUploadingPub(true);
+    try {
+      await uploadActPublication(actId, file);
+      reload();
+      toast(
+        bundle?.publicacao ? 'Arquivo da publicação substituído' : 'Arquivo da publicação anexado',
+        'ok',
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro no upload', 'danger');
+    } finally {
+      setUploadingPub(false);
+    }
+  };
+
   const original = bundle?.original;
+  const publicacao = bundle?.publicacao ?? null;
   const historico = bundle?.historico ?? [];
+  const historicoPublicacao = bundle?.historicoPublicacao ?? [];
   const API_URL = getApiBaseUrl();
 
   return (
@@ -461,6 +488,99 @@ export function ActMetadataAttachments({
           </div>
         )}
       </div>
+
+      {showPublication && (
+        <div>
+          <label className="mb-1 block text-[12px] text-ink-3">Arquivo da publicação</label>
+          {publicacao ? (
+            <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2 text-[12.5px]">
+              <p className="font-medium text-ink">{publicacao.nome}</p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                <a
+                  href={`${API_URL}${publicacao.adminDownloadUrl ?? publicacao.downloadUrl}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand hover:underline"
+                >
+                  Abrir / conferir
+                </a>
+                {editable && (
+                  <label className="cursor-pointer text-ink-3 hover:text-brand">
+                    <span className="inline-flex items-center gap-1">
+                      <Upload className="h-3 w-3" />
+                      {uploadingPub ? 'Enviando…' : 'Substituir'}
+                    </span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.doc,.docx,application/pdf"
+                      disabled={uploadingPub}
+                      onChange={(e) => {
+                        void onUploadPublication(e.target.files?.[0] ?? null);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+              <p className="mt-1 text-[11px] text-ink-4">
+                Documento oficial da publicação (opcional). Substituições ficam preservadas.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-[10px] border border-dashed border-line px-3 py-3 text-[12.5px] text-ink-3">
+              {editable ? (
+                <label className="inline-flex cursor-pointer items-center gap-2 text-brand">
+                  <Upload className="h-4 w-4" />
+                  {uploadingPub ? 'Enviando…' : 'Enviar arquivo da publicação (opcional)'}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.doc,.docx,application/pdf"
+                    disabled={uploadingPub}
+                    onChange={(e) => {
+                      void onUploadPublication(e.target.files?.[0] ?? null);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              ) : (
+                <span>Nenhum arquivo de publicação vinculado.</span>
+              )}
+            </div>
+          )}
+          {historicoPublicacao.length > 0 && (
+            <div className="mt-2 rounded-[8px] border border-line px-2.5 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-4">
+                Versões anteriores do arquivo da publicação
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {historicoPublicacao.map((h) => (
+                  <li
+                    key={h.id}
+                    className="flex flex-wrap items-center gap-2 text-[11.5px] text-ink-3"
+                  >
+                    <span>{h.nome}</span>
+                    {h.substituidoEm && (
+                      <span className="text-ink-4">
+                        substituído em {new Date(h.substituidoEm).toLocaleString('pt-BR')}
+                      </span>
+                    )}
+                    <a
+                      href={`${API_URL}${h.adminDownloadUrl ?? h.downloadUrl}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand hover:underline"
+                    >
+                      Abrir
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       <SupplementSection
         actId={actId}

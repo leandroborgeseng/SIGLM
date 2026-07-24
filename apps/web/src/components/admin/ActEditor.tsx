@@ -2,7 +2,14 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+} from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -23,6 +30,9 @@ import { DeleteUnitDialog } from '@/components/admin/DeleteUnitDialog';
 import { EditUnitDialog } from '@/components/admin/EditUnitDialog';
 import {
   CompareModeToggle,
+  DEFAULT_COMPARE_PANEL_HEIGHT,
+  MAX_COMPARE_PANEL_HEIGHT,
+  MIN_COMPARE_PANEL_HEIGHT,
   OriginalFilePane,
 } from '@/components/admin/OriginalFileCompare';
 import { UnitTextEditor } from '@/components/admin/UnitTextEditor';
@@ -36,18 +46,38 @@ import {
   deleteUnit,
   listActAttachments,
   listOrgans,
+  listPublicationMedia,
+  listSignatories,
   publishAct,
   restoreUnitVersion,
   saveLegislativeEffects,
   saveUnits,
+  startActStructuring,
   submitForReview,
   updateAct,
+  type AdminSignatory,
   type OriginOrg,
+  type PublicationMedium,
   type UnitPayload,
 } from '@/lib/admin-api';
 import { LegislativeEffectsSection } from '@/components/admin/LegislativeEffectsSection';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
-import { ACT_TYPE_LABELS, cn, formatFormalTitle, toDateInputValue } from '@/lib/format';
+import { AuthError } from '@/lib/api';
+import {
+  clearEditorDraft,
+  loadEditorDraft,
+  saveEditorDraft,
+} from '@/lib/editor-draft';
+import {
+  ACT_TYPE_LABELS,
+  cn,
+  ETAPA_EDITORIAL_LABELS,
+  formatFormalTitle,
+  resolveTituloPrefixo,
+  toDateInputValue,
+  type EditorialStage,
+} from '@/lib/format';
+import { forceRefreshAccessToken } from '@/lib/auth-session';
 import {
   DEFAULT_TEXTO_SIMPLES_FORMAT,
   type TextAlign,
@@ -76,6 +106,15 @@ interface EditorAct extends ActDetail {
   observacoesInternas?: string | null;
 }
 
+type PrefixoTituloModo = 'none' | 'auto' | 'manual';
+
+type ActSignatoryDraft = {
+  signatoryId?: string | null;
+  nome: string;
+  cargo: string;
+  ordem: number;
+};
+
 function unitsPayload(units: NormativeUnit[]): UnitPayload[] {
   return units.map((u, i) => ({
     id: u.id,
@@ -88,22 +127,72 @@ function unitsPayload(units: NormativeUnit[]): UnitPayload[] {
   }));
 }
 
-function fingerprint(
-  assunto: string,
-  dataAto: string,
-  orgaoId: string,
-  units: NormativeUnit[],
-) {
+function initialOrgaoIds(act: EditorAct): string[] {
+  if (act.orgaosOrigem?.length) {
+    return [...act.orgaosOrigem]
+      .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+      .map((o) => o.id);
+  }
+  return act.orgaoOrigemId ? [act.orgaoOrigemId] : [];
+}
+
+function initialSignatories(act: EditorAct): ActSignatoryDraft[] {
+  return (act.signatarios ?? [])
+    .slice()
+    .sort((a, b) => a.ordem - b.ordem)
+    .map((s, i) => ({
+      signatoryId: s.signatoryId ?? null,
+      nome: s.nome,
+      cargo: s.cargo,
+      ordem: i,
+    }));
+}
+
+type MetaFingerprint = {
+  assunto: string;
+  dataAto: string;
+  dataPublicacao: string;
+  meioPublicacaoId: string;
+  orgaoOrigemIds: string[];
+  atoConjunto: boolean;
+  prefixoTituloModo: PrefixoTituloModo;
+  prefixoTitulo: string;
+  signatories: ActSignatoryDraft[];
+  units: NormativeUnit[];
+};
+
+function fingerprint(meta: MetaFingerprint) {
   return JSON.stringify({
-    assunto,
-    dataAto,
-    orgaoId,
-    units: unitsPayload(units),
-    effects: units.map((u) => ({
+    assunto: meta.assunto,
+    dataAto: meta.dataAto,
+    dataPublicacao: meta.dataPublicacao,
+    meioPublicacaoId: meta.meioPublicacaoId,
+    orgaoOrigemIds: meta.orgaoOrigemIds,
+    atoConjunto: meta.atoConjunto,
+    prefixoTituloModo: meta.prefixoTituloModo,
+    prefixoTitulo: meta.prefixoTitulo,
+    signatories: meta.signatories,
+    units: unitsPayload(meta.units),
+    effects: meta.units.map((u) => ({
       id: u.id,
       effects: u.efeitosLegislativos ?? [],
     })),
   });
+}
+
+function metaFromAct(act: EditorAct, units: NormativeUnit[]): MetaFingerprint {
+  return {
+    assunto: act.assunto ?? '',
+    dataAto: toDateInputValue(act.dataAto),
+    dataPublicacao: toDateInputValue(act.dataPublicacao),
+    meioPublicacaoId: act.meioPublicacaoId ?? act.meioPublicacao?.id ?? '',
+    orgaoOrigemIds: initialOrgaoIds(act),
+    atoConjunto: Boolean(act.atoConjunto),
+    prefixoTituloModo: (act.prefixoTituloModo as PrefixoTituloModo) || 'none',
+    prefixoTitulo: act.prefixoTitulo ?? '',
+    signatories: initialSignatories(act),
+    units,
+  };
 }
 
 export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
@@ -114,8 +203,28 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const [units, setUnits] = useState<NormativeUnit[]>(initialAct.units);
   const [assunto, setAssunto] = useState(initialAct.assunto ?? '');
   const [dataAto, setDataAto] = useState(toDateInputValue(initialAct.dataAto));
-  const [orgaoId, setOrgaoId] = useState(initialAct.orgaoOrigemId ?? '');
+  const [dataPublicacao, setDataPublicacao] = useState(
+    toDateInputValue(initialAct.dataPublicacao),
+  );
+  const [meioPublicacaoId, setMeioPublicacaoId] = useState(
+    initialAct.meioPublicacaoId ?? initialAct.meioPublicacao?.id ?? '',
+  );
+  const [orgaoOrigemIds, setOrgaoOrigemIds] = useState<string[]>(() =>
+    initialOrgaoIds(initialAct),
+  );
+  const [atoConjunto, setAtoConjunto] = useState(Boolean(initialAct.atoConjunto));
+  const [prefixoTituloModo, setPrefixoTituloModo] = useState<PrefixoTituloModo>(
+    (initialAct.prefixoTituloModo as PrefixoTituloModo) || 'none',
+  );
+  const [prefixoTitulo, setPrefixoTitulo] = useState(initialAct.prefixoTitulo ?? '');
+  const [signatories, setSignatories] = useState<ActSignatoryDraft[]>(() =>
+    initialSignatories(initialAct),
+  );
   const [organs, setOrgans] = useState<OriginOrg[]>([]);
+  const [publicationMedia, setPublicationMedia] = useState<PublicationMedium[]>([]);
+  const [signatoryCatalog, setSignatoryCatalog] = useState<AdminSignatory[]>([]);
+  const [addOrgaoId, setAddOrgaoId] = useState('');
+  const [addSignatoryId, setAddSignatoryId] = useState('');
   const [saving, setSaving] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -128,42 +237,88 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     initialAct.arquivoOriginal ?? null,
   );
   const [splitPct, setSplitPct] = useState(46);
+  const [panelHeight, setPanelHeight] = useState(DEFAULT_COMPARE_PANEL_HEIGHT);
   const [mobilePane, setMobilePane] = useState<'original' | 'texto'>('texto');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const savedFingerprint = useRef(
-    fingerprint(
-      initialAct.assunto ?? '',
-      toDateInputValue(initialAct.dataAto),
-      initialAct.orgaoOrigemId ?? '',
-      initialAct.units,
-    ),
-  );
+
+  const currentMeta = (): MetaFingerprint => ({
+    assunto,
+    dataAto,
+    dataPublicacao,
+    meioPublicacaoId,
+    orgaoOrigemIds,
+    atoConjunto,
+    prefixoTituloModo,
+    prefixoTitulo,
+    signatories,
+    units,
+  });
+
+  const savedFingerprint = useRef(fingerprint(metaFromAct(initialAct, initialAct.units)));
 
   const editable =
     act.statusPublicacao !== 'publicado' || Boolean(act.editionOpen);
-  const dirty =
-    fingerprint(assunto, dataAto, orgaoId, units) !== savedFingerprint.current;
+  const dirty = fingerprint(currentMeta()) !== savedFingerprint.current;
 
   useEffect(() => {
     listOrgans(false)
       .then((list) => {
-        setOrgans(list);
+        const linked = initialOrgaoIds(initialAct);
+        const extras = (initialAct.orgaosOrigem ?? [])
+          .filter((o) => !list.some((l) => l.id === o.id))
+          .map((o) => ({
+            id: o.id,
+            nome: o.nome,
+            sigla: o.sigla ?? null,
+            ativo: false,
+          }));
         if (
           initialAct.orgaoOrigemId &&
-          !list.some((o) => o.id === initialAct.orgaoOrigemId)
+          !list.some((o) => o.id === initialAct.orgaoOrigemId) &&
+          !extras.some((o) => o.id === initialAct.orgaoOrigemId)
         ) {
-          setOrgans((prev) => [
-            ...prev,
+          extras.push({
+            id: initialAct.orgaoOrigemId,
+            nome: initialAct.orgaoOrigem ?? 'Órgão inativo',
+            sigla: null,
+            ativo: false,
+          });
+        }
+        setOrgans([...list, ...extras]);
+        void linked;
+      })
+      .catch(() => undefined);
+  }, [initialAct]);
+
+  useEffect(() => {
+    listPublicationMedia(false)
+      .then((list) => {
+        const linkedId = initialAct.meioPublicacaoId ?? initialAct.meioPublicacao?.id;
+        if (
+          linkedId &&
+          initialAct.meioPublicacao &&
+          !list.some((m) => m.id === linkedId)
+        ) {
+          setPublicationMedia([
+            ...list,
             {
-              id: initialAct.orgaoOrigemId!,
-              nome: initialAct.orgaoOrigem ?? 'Órgão inativo',
+              id: initialAct.meioPublicacao.id,
+              nome: initialAct.meioPublicacao.nome,
               ativo: false,
             },
           ]);
+        } else {
+          setPublicationMedia(list);
         }
       })
       .catch(() => undefined);
-  }, [initialAct.orgaoOrigem, initialAct.orgaoOrigemId]);
+  }, [initialAct.meioPublicacao, initialAct.meioPublicacaoId]);
+
+  useEffect(() => {
+    listSignatories(false)
+      .then(setSignatoryCatalog)
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     listActAttachments(act.id)
@@ -181,11 +336,22 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [dirty]);
 
+  const selectedOrgs = orgaoOrigemIds
+    .map((id) => organs.find((o) => o.id === id))
+    .filter((o): o is OriginOrg => Boolean(o));
+
+  const resolvedPrefixo = resolveTituloPrefixo(
+    prefixoTituloModo,
+    prefixoTitulo,
+    selectedOrgs,
+  );
+
   const tituloFormalPreview = formatFormalTitle(
     act.tipo,
     act.numero,
     dataAto ? new Date(dataAto).getUTCFullYear() || act.ano : act.ano,
     dataAto || null,
+    { atoConjunto, prefixo: resolvedPrefixo },
   );
 
   const hierarchy = useMemo(() => assessUnitsHierarchy(units), [units]);
@@ -195,7 +361,18 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     ementa: resolveActEmenta(units, act.ementa) || 'Ementa pendente',
     assunto,
     dataAto: dataAto || undefined,
-    orgaoOrigemId: orgaoId || undefined,
+    dataPublicacao: dataPublicacao || null,
+    meioPublicacaoId: meioPublicacaoId || null,
+    orgaoOrigemIds,
+    atoConjunto,
+    prefixoTituloModo,
+    prefixoTitulo: prefixoTituloModo === 'manual' ? prefixoTitulo.trim() || null : null,
+    signatories: signatories.map((s, i) => ({
+      signatoryId: s.signatoryId || null,
+      nome: s.nome,
+      cargo: s.cargo,
+      ordem: i,
+    })),
   });
 
   const syncFromAct = (updated: EditorAct) => {
@@ -203,13 +380,64 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setUnits(updated.units);
     setAssunto(updated.assunto ?? '');
     setDataAto(toDateInputValue(updated.dataAto));
-    setOrgaoId(updated.orgaoOrigemId ?? '');
-    savedFingerprint.current = fingerprint(
-      updated.assunto ?? '',
-      toDateInputValue(updated.dataAto),
-      updated.orgaoOrigemId ?? '',
-      updated.units,
-    );
+    setDataPublicacao(toDateInputValue(updated.dataPublicacao));
+    setMeioPublicacaoId(updated.meioPublicacaoId ?? updated.meioPublicacao?.id ?? '');
+    setOrgaoOrigemIds(initialOrgaoIds(updated));
+    setAtoConjunto(Boolean(updated.atoConjunto));
+    setPrefixoTituloModo((updated.prefixoTituloModo as PrefixoTituloModo) || 'none');
+    setPrefixoTitulo(updated.prefixoTitulo ?? '');
+    setSignatories(initialSignatories(updated));
+    savedFingerprint.current = fingerprint(metaFromAct(updated, updated.units));
+  };
+
+  const moveOrgao = (index: number, dir: -1 | 1) => {
+    const next = index + dir;
+    if (next < 0 || next >= orgaoOrigemIds.length) return;
+    setOrgaoOrigemIds((ids) => {
+      const copy = [...ids];
+      const tmp = copy[index];
+      copy[index] = copy[next];
+      copy[next] = tmp;
+      return copy;
+    });
+  };
+
+  const addOrgao = () => {
+    if (!addOrgaoId || orgaoOrigemIds.includes(addOrgaoId)) return;
+    setOrgaoOrigemIds((ids) => {
+      const next = [...ids, addOrgaoId];
+      if (next.length > 1) setAtoConjunto(true);
+      return next;
+    });
+    setAddOrgaoId('');
+  };
+
+  const moveSignatory = (index: number, dir: -1 | 1) => {
+    const next = index + dir;
+    if (next < 0 || next >= signatories.length) return;
+    setSignatories((list) => {
+      const copy = [...list];
+      const tmp = copy[index];
+      copy[index] = copy[next];
+      copy[next] = tmp;
+      return copy.map((s, i) => ({ ...s, ordem: i }));
+    });
+  };
+
+  const addSignatoryFromCatalog = () => {
+    if (!addSignatoryId) return;
+    const src = signatoryCatalog.find((s) => s.id === addSignatoryId);
+    if (!src) return;
+    setSignatories((list) => [
+      ...list,
+      {
+        signatoryId: src.id,
+        nome: src.nome,
+        cargo: src.cargo,
+        ordem: list.length,
+      },
+    ]);
+    setAddSignatoryId('');
   };
 
   const moveUnit = (index: number, direction: -1 | 1) => {
@@ -224,14 +452,28 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     return next !== units;
   };
 
-  const onDragStart = (index: number) => {
-    if (!editable) return;
+  const onDragStart = (index: number, e: ReactDragEvent) => {
+    if (!editable) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
     setDragIndex(index);
   };
 
+  const onDragEnd = () => {
+    setDragIndex(null);
+  };
+
   const onDrop = (index: number) => {
-    if (!editable || dragIndex === null || dragIndex === index) return;
-    setUnits(dragDropBlock(units, dragIndex, index));
+    if (!editable || dragIndex === null) {
+      setDragIndex(null);
+      return;
+    }
+    if (dragIndex !== index) {
+      setUnits(dragDropBlock(units, dragIndex, index));
+    }
     setDragIndex(null);
   };
 
@@ -357,20 +599,144 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     return withEffects;
   }, [act.id, units]);
 
-  const handleSave = async () => {
+  const [saveStatus, setSaveStatus] = useState<
+    'idle' | 'unsaved' | 'saving' | 'autosaving' | 'saved' | 'error'
+  >('idle');
+
+  const persistDraftLocal = useCallback(() => {
+    if (!editable) return;
+    saveEditorDraft({
+      actId: act.id,
+      savedAt: new Date().toISOString(),
+      assunto,
+      dataAto,
+      dataPublicacao,
+      meioPublicacaoId,
+      orgaoOrigemIds,
+      atoConjunto,
+      prefixoTituloModo,
+      prefixoTitulo,
+      signatories,
+      units,
+    });
+  }, [
+    editable,
+    act.id,
+    assunto,
+    dataAto,
+    dataPublicacao,
+    meioPublicacaoId,
+    orgaoOrigemIds,
+    atoConjunto,
+    prefixoTituloModo,
+    prefixoTitulo,
+    signatories,
+    units,
+  ]);
+
+  const handleSave = async (opts?: { silent?: boolean; auto?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    const auto = Boolean(opts?.auto);
     setSaving(true);
+    setSaveStatus(auto ? 'autosaving' : 'saving');
     try {
       await updateAct(act.id, metaPayload());
       const updated = await persistUnits();
       syncFromAct(updated);
-      toast('Alterações salvas', 'ok');
-      router.refresh();
+      clearEditorDraft(act.id);
+      setSaveStatus('saved');
+      if (!silent) {
+        toast(auto ? 'Salvo automaticamente' : 'Alterações salvas', 'ok');
+        if (!auto) router.refresh();
+      }
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Erro ao salvar', 'danger');
+      persistDraftLocal();
+      if (e instanceof AuthError) {
+        const token = await forceRefreshAccessToken();
+        if (token) {
+          try {
+            await updateAct(act.id, metaPayload());
+            const updated = await persistUnits();
+            syncFromAct(updated);
+            clearEditorDraft(act.id);
+            setSaveStatus('saved');
+            if (!silent) toast('Alterações salvas', 'ok');
+            return;
+          } catch {
+            /* fall through */
+          }
+        }
+        setSaveStatus('error');
+        toast(
+          'Não foi possível salvar: sessão expirada. Seu trabalho foi preservado nesta tela — entre novamente e use Recuperar rascunho se necessário.',
+          'danger',
+        );
+        return;
+      }
+      setSaveStatus('error');
+      toast(e instanceof Error ? e.message : 'Erro ao salvar — alterações mantidas na tela', 'danger');
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (dirty) setSaveStatus('unsaved');
+  }, [dirty]);
+
+  useEffect(() => {
+    if (!dirty || !editable) return;
+    const t = window.setTimeout(() => persistDraftLocal(), 800);
+    return () => window.clearTimeout(t);
+  }, [dirty, editable, persistDraftLocal]);
+
+  useEffect(() => {
+    if (!dirty || !editable || !can('acts:write')) return;
+    const t = window.setTimeout(() => {
+      void handleSave({ silent: true, auto: true });
+    }, 180_000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, editable, assunto, dataAto, units, orgaoOrigemIds]);
+
+  useEffect(() => {
+    const draft = loadEditorDraft(act.id);
+    if (!draft || !editable) return;
+    const serverFp = fingerprint(metaFromAct(act, act.units));
+    const draftFp = fingerprint({
+      assunto: draft.assunto,
+      dataAto: draft.dataAto,
+      dataPublicacao: draft.dataPublicacao,
+      meioPublicacaoId: draft.meioPublicacaoId,
+      orgaoOrigemIds: draft.orgaoOrigemIds,
+      atoConjunto: draft.atoConjunto,
+      prefixoTituloModo: draft.prefixoTituloModo as PrefixoTituloModo,
+      prefixoTitulo: draft.prefixoTitulo,
+      signatories: draft.signatories,
+      units: draft.units,
+    });
+    if (draftFp === serverFp) {
+      clearEditorDraft(act.id);
+      return;
+    }
+    const ok = window.confirm(
+      'Há um rascunho local não salvo deste ato (ex.: após falha de sessão). Deseja recuperá-lo?',
+    );
+    if (!ok) return;
+    setAssunto(draft.assunto);
+    setDataAto(draft.dataAto);
+    setDataPublicacao(draft.dataPublicacao);
+    setMeioPublicacaoId(draft.meioPublicacaoId);
+    setOrgaoOrigemIds(draft.orgaoOrigemIds);
+    setAtoConjunto(draft.atoConjunto);
+    setPrefixoTituloModo((draft.prefixoTituloModo as PrefixoTituloModo) || 'none');
+    setPrefixoTitulo(draft.prefixoTitulo);
+    setSignatories(draft.signatories);
+    setUnits(draft.units);
+    setSaveStatus('unsaved');
+    toast('Rascunho local recuperado — revise e salve as alterações', 'warn');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [act.id]);
 
   const handleSubmitReview = async () => {
     setSaving(true);
@@ -396,7 +762,9 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     try {
       if (editable && dirty) {
         await updateAct(act.id, metaPayload());
-        await persistUnits();
+        if (units.length > 0) {
+          await persistUnits();
+        }
       }
       const updated = await publishAct(act.id);
       syncFromAct(updated);
@@ -421,6 +789,23 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao criar versão', 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStartStructuring = async () => {
+    if (dirty && !window.confirm('Há alterações não salvas que serão descartadas. Continuar?')) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await startActStructuring(act.id);
+      syncFromAct(updated);
+      toast('Estruturação iniciada — use Comparar com arquivo original para montar o texto', 'ok');
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao iniciar estruturação', 'danger');
     } finally {
       setSaving(false);
     }
@@ -454,20 +839,47 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     publicado: 'Publicado',
   };
 
+  const isFileOnlyStage = act.etapaEditorial === 'somente_arquivo_original';
   const canPublish =
     can('acts:publish') &&
     (act.statusPublicacao === 'em_revisao' ||
-      (act.statusPublicacao === 'publicado' && Boolean(act.editionOpen)));
+      (act.statusPublicacao === 'publicado' && Boolean(act.editionOpen)) ||
+      (act.statusPublicacao === 'rascunho' && isFileOnlyStage));
+
+  const saveStatusLabel =
+    saveStatus === 'saving'
+      ? 'Salvando…'
+      : saveStatus === 'autosaving'
+        ? 'Salvando automaticamente…'
+        : saveStatus === 'saved'
+          ? 'Salvo'
+          : saveStatus === 'error'
+            ? 'Falha ao salvar'
+            : saveStatus === 'unsaved' || dirty
+              ? 'Alterações não salvas'
+              : null;
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <AdminTopbar
+        sticky
         title="Editor de texto estruturado"
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {dirty && (
-              <Badge variant="warn" className="text-[11px]">
-                Alterações não salvas
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+            {saveStatusLabel && (
+              <Badge
+                variant={
+                  saveStatus === 'error'
+                    ? 'danger'
+                    : saveStatus === 'saved'
+                      ? 'ok'
+                      : saveStatus === 'saving' || saveStatus === 'autosaving'
+                        ? 'info'
+                        : 'warn'
+                }
+                className="text-[11px]"
+              >
+                {saveStatusLabel}
               </Badge>
             )}
             <Link
@@ -504,19 +916,33 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               }}
               onExit={() => setCompareMode(false)}
             />
+            {can('acts:write') && isFileOnlyStage && (
+              <Button size="sm" variant="tonal" onClick={() => void handleStartStructuring()} disabled={saving}>
+                Iniciar estruturação
+              </Button>
+            )}
             {can('acts:version') &&
               act.statusPublicacao === 'publicado' &&
-              !act.editionOpen && (
+              !act.editionOpen &&
+              !isFileOnlyStage && (
                 <Button size="sm" onClick={handleCreateEdition} disabled={saving}>
                   Criar nova versão
                 </Button>
               )}
             {can('acts:write') && editable && (
-              <Button variant="outlined" size="sm" onClick={handleSave} disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar alterações'}
+              <Button
+                variant="outlined"
+                size="sm"
+                onClick={() => void handleSave()}
+                disabled={saving}
+              >
+                {saving && saveStatus !== 'autosaving' ? 'Salvando...' : 'Salvar alterações'}
               </Button>
             )}
-            {can('acts:write') && editable && act.statusPublicacao !== 'publicado' && (
+            {can('acts:write') &&
+              editable &&
+              act.statusPublicacao !== 'publicado' &&
+              !isFileOnlyStage && (
               <Button variant="tonal" size="sm" onClick={handleSubmitReview} disabled={saving}>
                 Enviar para revisão
               </Button>
@@ -530,6 +956,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         }
       />
 
+      <div className="min-h-0 flex-1 overflow-auto">
       {act.statusPublicacao === 'publicado' && !act.editionOpen && (
         <div className="mx-6 mt-4 rounded-[10px] border border-line bg-surface-2 px-4 py-3 text-[13px] text-ink-2">
           Este ato está publicado. A consulta pública exibe a versão oficial. Para corrigir
@@ -546,7 +973,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
 
       <div
         className={cn(
-          'grid flex-1 gap-6 overflow-auto p-6',
+          'grid gap-6 p-6',
           compareMode ? 'lg:grid-cols-1' : 'lg:grid-cols-[340px_1fr]',
         )}
       >
@@ -558,6 +985,12 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               <Badge variant="info">
                 {statusLabel[act.statusPublicacao ?? 'rascunho'] ?? act.statusPublicacao}
               </Badge>
+              {act.etapaEditorial && (
+                <Badge variant={isFileOnlyStage ? 'warn' : 'neutral'}>
+                  {ETAPA_EDITORIAL_LABELS[act.etapaEditorial as EditorialStage] ??
+                    act.etapaEditorial}
+                </Badge>
+              )}
               {act.editionOpen && <Badge variant="warn">Versão de trabalho</Badge>}
             </div>
           </div>
@@ -566,15 +999,9 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               <label className="mb-1 block text-[12px] text-ink-3">Tipo</label>
               <Input value={ACT_TYPE_LABELS[act.tipo]} readOnly />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="mb-1 block text-[12px] text-ink-3">Número</label>
-                <Input value={act.numero} readOnly />
-              </div>
-              <div>
-                <label className="mb-1 block text-[12px] text-ink-3">Ano</label>
-                <Input value={act.ano} readOnly />
-              </div>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Número</label>
+              <Input value={act.numero} readOnly />
             </div>
             <div>
               <label className="mb-1 block text-[12px] text-ink-3">Data do ato</label>
@@ -585,14 +1012,67 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 disabled={!editable}
               />
               <p className="mt-1 text-[11px] text-ink-4">
-                Gera o título formal automaticamente. O ano pode ser preenchido a partir desta data.
+                Gera o título formal automaticamente. O ano (
+                {dataAto ? new Date(dataAto).getUTCFullYear() || act.ano : act.ano}) é obtido
+                automaticamente desta data.
               </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Data de publicação</label>
+              <Input
+                type="date"
+                value={dataPublicacao}
+                onChange={(e) => setDataPublicacao(e.target.value)}
+                disabled={!editable}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Meio de publicação</label>
+              <Select
+                value={meioPublicacaoId}
+                onChange={(e) => setMeioPublicacaoId(e.target.value)}
+                disabled={!editable}
+              >
+                <option value="">Selecione…</option>
+                {publicationMedia
+                  .filter((m) => m.ativo || m.id === meioPublicacaoId)
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.nome}
+                      {!m.ativo ? ' (inativo)' : ''}
+                    </option>
+                  ))}
+              </Select>
             </div>
             <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2">
               <p className="text-[11px] uppercase tracking-wide text-ink-4">Título formal</p>
               <p className="mt-0.5 text-[13px] font-semibold uppercase text-ink">
                 {tituloFormalPreview}
               </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Prefixo do título</label>
+              <Select
+                value={prefixoTituloModo}
+                onChange={(e) => setPrefixoTituloModo(e.target.value as PrefixoTituloModo)}
+                disabled={!editable}
+              >
+                <option value="none">Nenhum</option>
+                <option value="auto">Automático (siglas dos órgãos)</option>
+                <option value="manual">Manual</option>
+              </Select>
+              {prefixoTituloModo === 'manual' && (
+                <Input
+                  className="mt-2"
+                  value={prefixoTitulo}
+                  onChange={(e) => setPrefixoTitulo(e.target.value)}
+                  disabled={!editable}
+                  placeholder="Ex.: SEFAZ/SEMAD"
+                />
+              )}
+              {prefixoTituloModo === 'auto' && resolvedPrefixo && (
+                <p className="mt-1 text-[11px] text-ink-4">Prévia: {resolvedPrefixo}</p>
+              )}
             </div>
             <div className="rounded-[10px] border border-dashed border-line px-3 py-2 text-[12.5px] text-ink-3">
               A ementa oficial é cadastrada no Texto Estruturado (grupo Texto → Ementa), não nos
@@ -607,27 +1087,208 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-[12px] text-ink-3">Órgão de origem</label>
-              <Select
-                value={orgaoId}
-                onChange={(e) => setOrgaoId(e.target.value)}
+              <label className="mb-1 block text-[12px] text-ink-3">Órgãos de origem</label>
+              {orgaoOrigemIds.length === 0 ? (
+                <p className="mb-2 text-[12px] text-ink-4">Nenhum órgão selecionado.</p>
+              ) : (
+                <ul className="mb-2 space-y-1.5">
+                  {orgaoOrigemIds.map((id, index) => {
+                    const org = organs.find((o) => o.id === id);
+                    return (
+                      <li
+                        key={id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px]"
+                      >
+                        <span className="font-medium text-ink">
+                          {org?.sigla ? `${org.sigla} — ` : ''}
+                          {org?.nome ?? id}
+                          {org && !org.ativo ? ' (inativo)' : ''}
+                        </span>
+                        {editable && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="rounded px-1 text-ink-3 hover:text-brand disabled:opacity-30"
+                              disabled={index === 0}
+                              onClick={() => moveOrgao(index, -1)}
+                              aria-label="Subir órgão"
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded px-1 text-ink-3 hover:text-brand disabled:opacity-30"
+                              disabled={index === orgaoOrigemIds.length - 1}
+                              onClick={() => moveOrgao(index, 1)}
+                              aria-label="Descer órgão"
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded px-1 text-danger"
+                              onClick={() =>
+                                setOrgaoOrigemIds((ids) => ids.filter((x) => x !== id))
+                              }
+                              aria-label="Remover órgão"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {editable && (
+                <div className="flex flex-wrap gap-2">
+                  <Select
+                    className="min-w-0 flex-1"
+                    value={addOrgaoId}
+                    onChange={(e) => setAddOrgaoId(e.target.value)}
+                  >
+                    <option value="">Adicionar órgão…</option>
+                    {organs
+                      .filter((o) => o.ativo && !orgaoOrigemIds.includes(o.id))
+                      .map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.sigla ? `${o.sigla} — ${o.nome}` : o.nome}
+                        </option>
+                      ))}
+                  </Select>
+                  <Button type="button" size="sm" variant="ghost" onClick={addOrgao} disabled={!addOrgaoId}>
+                    <Plus className="h-3.5 w-3.5" />
+                    Incluir
+                  </Button>
+                </div>
+              )}
+              {orgaoOrigemIds.length > 1 && !atoConjunto && (
+                <p className="mt-1.5 text-[11px] text-warn">
+                  Há mais de um órgão — considere marcar como ato conjunto.
+                </p>
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-[13px] text-ink">
+              <input
+                type="checkbox"
+                checked={atoConjunto}
+                onChange={(e) => setAtoConjunto(e.target.checked)}
                 disabled={!editable}
-              >
-                <option value="">Selecione…</option>
-                {organs
-                  .filter((o) => o.ativo || o.id === orgaoId)
-                  .map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.nome}
-                      {!o.ativo ? ' (inativo)' : ''}
-                    </option>
+                className="h-4 w-4"
+              />
+              Ato conjunto
+            </label>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">Signatários</label>
+              {signatories.length === 0 ? (
+                <p className="mb-2 text-[12px] text-ink-4">Nenhum signatário vinculado.</p>
+              ) : (
+                <ul className="mb-2 space-y-2">
+                  {signatories.map((s, index) => (
+                    <li
+                      key={`${s.signatoryId ?? 'custom'}-${index}`}
+                      className="space-y-1.5 rounded-[8px] border border-line bg-surface-2 px-2.5 py-2"
+                    >
+                      <Input
+                        value={s.nome}
+                        onChange={(e) =>
+                          setSignatories((list) =>
+                            list.map((item, i) =>
+                              i === index ? { ...item, nome: e.target.value } : item,
+                            ),
+                          )
+                        }
+                        disabled={!editable}
+                        placeholder="Nome"
+                      />
+                      <Input
+                        value={s.cargo}
+                        onChange={(e) =>
+                          setSignatories((list) =>
+                            list.map((item, i) =>
+                              i === index ? { ...item, cargo: e.target.value } : item,
+                            ),
+                          )
+                        }
+                        disabled={!editable}
+                        placeholder="Cargo"
+                      />
+                      {editable && (
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            className="rounded px-1 text-ink-3 hover:text-brand disabled:opacity-30"
+                            disabled={index === 0}
+                            onClick={() => moveSignatory(index, -1)}
+                            aria-label="Subir signatário"
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded px-1 text-ink-3 hover:text-brand disabled:opacity-30"
+                            disabled={index === signatories.length - 1}
+                            onClick={() => moveSignatory(index, 1)}
+                            aria-label="Descer signatário"
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded px-1 text-danger"
+                            onClick={() =>
+                              setSignatories((list) =>
+                                list.filter((_, i) => i !== index).map((item, i) => ({
+                                  ...item,
+                                  ordem: i,
+                                })),
+                              )
+                            }
+                            aria-label="Remover signatário"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </li>
                   ))}
-              </Select>
+                </ul>
+              )}
+              {editable && (
+                <div className="flex flex-wrap gap-2">
+                  <Select
+                    className="min-w-0 flex-1"
+                    value={addSignatoryId}
+                    onChange={(e) => setAddSignatoryId(e.target.value)}
+                  >
+                    <option value="">Adicionar do catálogo…</option>
+                    {signatoryCatalog
+                      .filter((s) => s.ativo)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.nome} — {s.cargo}
+                        </option>
+                      ))}
+                  </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={addSignatoryFromCatalog}
+                    disabled={!addSignatoryId}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Incluir
+                  </Button>
+                </div>
+              )}
             </div>
             <ActMetadataAttachments
               actId={act.id}
               editable={editable && can('acts:write')}
               onOriginalChange={setOriginalFile}
+              showPublication={Boolean(meioPublicacaoId)}
             />
           </div>
         </section>
@@ -657,17 +1318,35 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 Texto estruturado
               </button>
             </div>
-            <label className="hidden items-center gap-2 text-[12px] text-ink-3 lg:flex">
-              Largura do original
-              <input
-                type="range"
-                min={28}
-                max={70}
-                value={splitPct}
-                onChange={(e) => setSplitPct(Number(e.target.value))}
-                className="w-36"
-              />
-            </label>
+            <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 sm:justify-end">
+              <label className="hidden items-center gap-2 text-[12px] text-ink-3 lg:flex">
+                Largura do original
+                <input
+                  type="range"
+                  min={28}
+                  max={70}
+                  value={splitPct}
+                  onChange={(e) => setSplitPct(Number(e.target.value))}
+                  className="w-36"
+                  aria-valuetext={`${splitPct}%`}
+                />
+                <span className="w-8 tabular-nums text-ink-4">{splitPct}%</span>
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-ink-3">
+                Altura dos quadros
+                <input
+                  type="range"
+                  min={MIN_COMPARE_PANEL_HEIGHT}
+                  max={MAX_COMPARE_PANEL_HEIGHT}
+                  step={20}
+                  value={panelHeight}
+                  onChange={(e) => setPanelHeight(Number(e.target.value))}
+                  className="w-36"
+                  aria-valuetext={`${panelHeight}px`}
+                />
+                <span className="w-12 tabular-nums text-ink-4">{panelHeight}px</span>
+              </label>
+            </div>
           </div>
         )}
 
@@ -675,24 +1354,35 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
           className={cn(
             compareMode && originalFile && 'flex flex-col gap-3 lg:flex-row lg:items-stretch',
           )}
+          style={
+            compareMode && originalFile
+              ? { ['--compare-split' as string]: `${splitPct}%` }
+              : undefined
+          }
         >
           {compareMode && originalFile && (
             <div
-              className={cn('min-w-0', mobilePane !== 'original' && 'max-lg:hidden')}
-              style={{ flex: `0 0 ${splitPct}%` }}
+              className={cn(
+                'min-w-0 w-full lg:w-[var(--compare-split)] lg:flex-none',
+                mobilePane !== 'original' && 'max-lg:hidden',
+              )}
             >
-              <OriginalFilePane actId={act.id} attachment={originalFile} />
+              <OriginalFilePane
+                actId={act.id}
+                attachment={originalFile}
+                heightPx={panelHeight}
+              />
             </div>
           )}
           <div
             className={cn(
               'min-w-0',
-              compareMode && originalFile && 'flex-1 overflow-y-auto',
+              compareMode && originalFile && 'w-full flex-1 overflow-y-auto',
               compareMode && originalFile && mobilePane !== 'texto' && 'max-lg:hidden',
             )}
             style={
               compareMode && originalFile
-                ? { maxHeight: 'min(72vh, 900px)' }
+                ? { height: panelHeight, maxHeight: panelHeight }
                 : undefined
             }
           >
@@ -738,10 +1428,12 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               return (
                 <div
                   key={unit.id}
-                  draggable={editable}
-                  onDragStart={() => onDragStart(index)}
-                  onDragOver={(e) => e.preventDefault()}
+                  onDragOver={(e) => {
+                    if (!editable || dragIndex === null) return;
+                    e.preventDefault();
+                  }}
                   onDrop={() => onDrop(index)}
+                  onDragEnd={onDragEnd}
                   style={{ marginLeft: indent }}
                   className={cn(
                     'flex items-start gap-2 rounded-[10px] border border-line-2 bg-surface-2 p-3 transition',
@@ -765,7 +1457,20 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                   ) : (
                     <span className="mt-0.5 inline-block w-5 shrink-0" />
                   )}
-                  <GripVertical className="mt-1 h-4 w-4 shrink-0 cursor-grab text-ink-4" />
+                  {editable ? (
+                    <span
+                      draggable
+                      onDragStart={(e) => onDragStart(index, e)}
+                      onDragEnd={onDragEnd}
+                      className="mt-1 inline-flex shrink-0 cursor-grab touch-none text-ink-4 active:cursor-grabbing"
+                      aria-label="Arrastar para reordenar"
+                      title="Arrastar para reordenar"
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                  ) : (
+                    <GripVertical className="mt-1 h-4 w-4 shrink-0 text-ink-4 opacity-40" />
+                  )}
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[12px] font-semibold text-brand">
@@ -985,6 +1690,8 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         </div>
       </div>
 
+      </div>
+
       <AddUnitDialog
         open={addDialogOpen}
         onClose={() => setAddDialogOpen(false)}
@@ -1007,6 +1714,6 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         onClose={() => !deleting && setDeleteTarget(null)}
         onConfirm={handleDeleteUnit}
       />
-    </>
+    </div>
   );
 }

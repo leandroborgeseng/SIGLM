@@ -10,7 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ActSituacao, ActType } from '@prisma/client';
+import { ActSituacao, ActType, EditorialStage, PublicationStatus } from '@prisma/client';
 import { Public, RequirePermissions } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/auth.constants';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -89,13 +89,27 @@ export class AdminActsController {
     @Query('q') q?: string,
     @Query('tipo') tipo?: ActType,
     @Query('situacao') situacao?: ActSituacao,
+    @Query('statusPublicacao') statusPublicacao?: PublicationStatus,
+    @Query('etapaEditorial') etapaEditorial?: EditorialStage,
+    @Query('norma') norma?: string,
+    @Query('ementa') ementa?: string,
+    @Query('publicadoDe') publicadoDe?: string,
+    @Query('publicadoAte') publicadoAte?: string,
     @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     return this.acts.getAdminList({
       q,
       tipo,
       situacao,
+      statusPublicacao,
+      etapaEditorial,
+      norma,
+      ementa,
+      publicadoDe,
+      publicadoAte,
       page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 20,
     });
   }
 
@@ -180,6 +194,12 @@ export class AdminActsController {
   @RequirePermissions('acts:version')
   createEdition(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.acts.createEdition(id, user.id);
+  }
+
+  @Post(':id/start-structuring')
+  @RequirePermissions('acts:write')
+  startStructuring(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.acts.startStructuring(id, user.id);
   }
 
   @Post(':id/publish')

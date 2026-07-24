@@ -17,7 +17,9 @@ export default async function EditorPage({ params }: { params: Promise<{ id: str
 
   return (
     <ToastProvider>
-      <ActEditor initialAct={act} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ActEditor initialAct={act} />
+      </div>
     </ToastProvider>
   );
 }

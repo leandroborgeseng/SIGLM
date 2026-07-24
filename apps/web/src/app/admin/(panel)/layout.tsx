@@ -8,11 +8,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <AdminAuthProvider>
       <AdminMenuProvider>
       <SkipLink />
-      <div className="flex min-h-dvh bg-canvas">
+      <div className="flex h-dvh max-h-dvh overflow-hidden bg-canvas">
         <AdminSidebar />
         <main
           id="main-content"
-          className="flex min-w-0 flex-1 flex-col pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0"
         >
           {children}
         </main>

@@ -7,7 +7,9 @@ import { fetchActAttachmentFileUrl } from '@/lib/admin-api';
 import { cn } from '@/lib/format';
 import type { ActAttachment } from '@/lib/types';
 
-const PANEL_HEIGHT = 'min(72vh, 900px)';
+export const DEFAULT_COMPARE_PANEL_HEIGHT = 780;
+export const MIN_COMPARE_PANEL_HEIGHT = 360;
+export const MAX_COMPARE_PANEL_HEIGHT = 1400;
 
 function isPdf(name: string) {
   return /\.pdf$/i.test(name) || name.toLowerCase().includes('pdf');
@@ -22,10 +24,13 @@ export function OriginalFilePane({
   actId,
   attachment,
   className,
+  heightPx = DEFAULT_COMPARE_PANEL_HEIGHT,
 }: {
   actId: string;
   attachment: ActAttachment;
   className?: string;
+  /** Altura visível do quadro (px). */
+  heightPx?: number;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -72,7 +77,7 @@ export function OriginalFilePane({
           </a>
         )}
       </div>
-      <div className="min-h-0 flex-1 p-2" style={{ height: PANEL_HEIGHT }}>
+      <div className="min-h-0 flex-1 p-2" style={{ height: heightPx }}>
         {loading && (
           <p className="p-4 text-[13px] text-ink-4">Carregando arquivo…</p>
         )}

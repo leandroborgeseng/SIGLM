@@ -28,7 +28,10 @@ import {
 } from '@/lib/unit-hierarchy';
 
 const STEPS = ['Upload', 'Conferência', 'Publicação'];
-const PANEL_HEIGHT = 'min(72vh, 820px)';
+const DEFAULT_PANEL_HEIGHT = 780;
+const MIN_PANEL_HEIGHT = 360;
+const MAX_PANEL_HEIGHT = 1400;
+const DEFAULT_SPLIT_PCT = 50;
 
 const EDITABLE_TYPES: UnitType[] = [
   ...HIERARCHY_TYPES,
@@ -70,6 +73,7 @@ export function ImportPanel() {
   const [meta, setMeta] = useState({
     tipo: 'lei',
     numero: '',
+    dataAto: '',
     ano: String(new Date().getFullYear()),
     ementa: '',
   });
@@ -77,6 +81,8 @@ export function ImportPanel() {
   const [dirty, setDirty] = useState(false);
   const [editingOrdem, setEditingOrdem] = useState<number | null>(null);
   const [efeitosAceitos, setEfeitosAceitos] = useState<Set<string>>(new Set());
+  const [splitPct, setSplitPct] = useState(DEFAULT_SPLIT_PCT);
+  const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
   const metaAppliedFor = useRef<string | null>(null);
   const effectsInitFor = useRef<string | null>(null);
   const structureInitFor = useRef<string | null>(null);
@@ -89,13 +95,21 @@ export function ImportPanel() {
         ? detected.tipo
         : 'lei';
 
+    const ano =
+      detected?.ano != null
+        ? String(detected.ano)
+        : String(new Date().getFullYear());
+    const dataAto =
+      detected?.dataAto
+        ? String(detected.dataAto).slice(0, 10)
+        : detected?.ano != null
+          ? `${detected.ano}-01-01`
+          : '';
     setMeta({
       tipo,
       numero: detected?.numero != null ? String(detected.numero) : '',
-      ano:
-        detected?.ano != null
-          ? String(detected.ano)
-          : String(new Date().getFullYear()),
+      dataAto,
+      ano: dataAto ? String(new Date(dataAto).getUTCFullYear()) : ano,
       ementa: detected?.ementa ?? ementaBlock?.texto ?? '',
     });
   }, []);
@@ -282,10 +296,14 @@ export function ImportPanel() {
           blocos.map((b, i) => ({ ...b, ordem: i })),
         );
       }
+      const ano = meta.dataAto
+        ? new Date(meta.dataAto).getUTCFullYear()
+        : Number(meta.ano) || new Date().getFullYear();
       const result = await confirmImport(imp.id, {
         tipo: meta.tipo,
         numero: meta.numero ? Number(meta.numero) : undefined,
-        ano: Number(meta.ano),
+        ano,
+        dataAto: meta.dataAto || undefined,
         ementa: meta.ementa || undefined,
         efeitosAceitos: [...efeitosAceitos],
         blocos: blocos.map((b, i) => ({ ...b, ordem: i })),
@@ -329,10 +347,20 @@ export function ImportPanel() {
   );
 
   return (
-    <>
-      <AdminTopbar title="Importação e conferência" />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <AdminTopbar
+        sticky
+        title="Importação estruturada"
+        actions={
+          <Link href="/admin/importar">
+            <Button variant="ghost" size="sm">
+              Trocar fluxo
+            </Button>
+          </Link>
+        }
+      />
 
-      <div className="flex-1 overflow-auto p-6">
+      <div className="min-h-0 flex-1 overflow-auto p-6">
         <div className="mb-8 flex gap-2">
           {STEPS.map((step, i) => (
             <div key={step} className="flex items-center gap-2">
@@ -416,9 +444,9 @@ export function ImportPanel() {
               {imp.formato === 'pdf_ocr' && <Badge variant="warn">OCR</Badge>}
             </div>
 
-            <div className="mb-6 grid gap-4 rounded-[14px] border border-line bg-surface p-5 sm:grid-cols-4">
+            <div className="mb-6 grid gap-4 rounded-[14px] border border-line bg-surface p-5 sm:grid-cols-2 lg:grid-cols-4">
               {imp.estruturaDetectada?.metadados?.tituloCompleto && (
-                <p className="sm:col-span-4 text-[12px] text-ink-3">
+                <p className="sm:col-span-2 lg:col-span-4 text-[12px] text-ink-3">
                   Título identificado:{' '}
                   <span className="font-semibold text-ink">
                     {imp.estruturaDetectada.metadados.tituloCompleto}
@@ -454,15 +482,27 @@ export function ImportPanel() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-[12px] text-ink-3">Ano</label>
+                <label className="mb-1 block text-[12px] text-ink-3">Data do ato</label>
                 <Input
-                  value={meta.ano}
+                  type="date"
+                  value={meta.dataAto}
                   onChange={(e) => {
-                    setMeta({ ...meta, ano: e.target.value });
+                    const dataAto = e.target.value;
+                    setMeta({
+                      ...meta,
+                      dataAto,
+                      ano: dataAto
+                        ? String(new Date(dataAto).getUTCFullYear())
+                        : meta.ano,
+                    });
                     setDirty(true);
                   }}
                   className="font-mono"
                 />
+                <p className="mt-1 text-[11px] text-ink-4">
+                  Ano {meta.dataAto ? new Date(meta.dataAto).getUTCFullYear() : meta.ano}{' '}
+                  derivado automaticamente
+                </p>
               </div>
               <div>
                 <label className="mb-1 block text-[12px] text-ink-3">Ementa</label>
@@ -476,13 +516,47 @@ export function ImportPanel() {
               </div>
             </div>
 
-            {/* Item 12/13: painéis lado a lado com altura fixa e scroll interno */}
-            <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
-              <section className="flex min-h-0 flex-col rounded-[14px] border border-line bg-surface">
+            {/* Controles de tamanho da comparação (largura + altura) */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[12px] border border-line bg-surface px-3 py-2.5">
+              <label className="flex items-center gap-2 text-[12px] text-ink-3">
+                Largura do original
+                <input
+                  type="range"
+                  min={28}
+                  max={70}
+                  value={splitPct}
+                  onChange={(e) => setSplitPct(Number(e.target.value))}
+                  className="w-36"
+                  aria-valuetext={`${splitPct}%`}
+                />
+                <span className="w-8 tabular-nums text-ink-4">{splitPct}%</span>
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-ink-3">
+                Altura dos quadros
+                <input
+                  type="range"
+                  min={MIN_PANEL_HEIGHT}
+                  max={MAX_PANEL_HEIGHT}
+                  step={20}
+                  value={panelHeight}
+                  onChange={(e) => setPanelHeight(Number(e.target.value))}
+                  className="w-36"
+                  aria-valuetext={`${panelHeight}px`}
+                />
+                <span className="w-12 tabular-nums text-ink-4">{panelHeight}px</span>
+              </label>
+            </div>
+
+            {/* Painéis lado a lado com altura controlada e scroll interno */}
+            <div
+              className="flex flex-col gap-4 lg:flex-row lg:items-stretch"
+              style={{ ['--import-split' as string]: `${splitPct}%` }}
+            >
+              <section className="flex min-h-0 w-full min-w-0 flex-col rounded-[14px] border border-line bg-surface lg:w-[var(--import-split)] lg:flex-none">
                 <div className="shrink-0 border-b border-line px-4 py-3">
                   <h2 className="text-section">Arquivo original</h2>
                 </div>
-                <div className="min-h-0 flex-1 p-3" style={{ height: PANEL_HEIGHT }}>
+                <div className="min-h-0 flex-1 p-3" style={{ height: panelHeight }}>
                   {imp.formato.includes('pdf') ? (
                     filePreviewUrl ? (
                       <iframe
@@ -515,7 +589,7 @@ export function ImportPanel() {
                 </div>
               </section>
 
-              <section className="flex min-h-0 flex-col rounded-[14px] border border-line bg-surface">
+              <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[14px] border border-line bg-surface">
                 <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-4 py-3">
                   <h2 className="text-section">Estrutura identificada</h2>
                   {dirty && (
@@ -529,7 +603,7 @@ export function ImportPanel() {
                     </Button>
                   )}
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto p-3" style={{ height: PANEL_HEIGHT }}>
+                <div className="min-h-0 flex-1 overflow-y-auto p-3" style={{ height: panelHeight }}>
                   {blocos.length > 0 ? (
                     <ul className="space-y-2">
                       {blocos.map((item) => {
@@ -780,6 +854,6 @@ export function ImportPanel() {
           </>
         )}
       </div>
-    </>
+    </div>
   );
 }

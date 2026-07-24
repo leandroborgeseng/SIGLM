@@ -64,6 +64,22 @@ export class AttachmentsController {
     return this.attachments.uploadOriginal(actId, file, user.id);
   }
 
+  @Post('publicacao')
+  @RequirePermissions('acts:write')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 40 * 1024 * 1024 },
+    }),
+  )
+  uploadPublication(
+    @Param('actId') actId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.attachments.uploadPublicationFile(actId, file, user.id);
+  }
+
   @Post('supplements')
   @RequirePermissions('acts:write')
   @UseInterceptors(
