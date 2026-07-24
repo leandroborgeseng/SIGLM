@@ -552,20 +552,23 @@ export function ImportPanel() {
               className="flex flex-col gap-4 lg:flex-row lg:items-stretch"
               style={{ ['--import-split' as string]: `${splitPct}%` }}
             >
-              <section className="flex min-h-0 w-full min-w-0 flex-col rounded-[14px] border border-line bg-surface lg:w-[var(--import-split)] lg:flex-none">
+              <section
+                className="flex min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[14px] border border-line bg-surface lg:w-[var(--import-split)] lg:flex-none"
+                style={{ height: panelHeight, maxHeight: panelHeight }}
+              >
                 <div className="shrink-0 border-b border-line px-4 py-3">
                   <h2 className="text-section">Arquivo original</h2>
                 </div>
-                <div className="min-h-0 flex-1 p-3" style={{ height: panelHeight }}>
+                <div className="relative min-h-0 flex-1">
                   {imp.formato.includes('pdf') ? (
                     filePreviewUrl ? (
                       <iframe
                         src={filePreviewUrl}
-                        className="h-full w-full rounded-[10px] border border-line-2 bg-surface-2"
+                        className="absolute inset-0 h-full w-full border-0 bg-white"
                         title="Preview PDF"
                       />
                     ) : (
-                      <div className="flex h-full items-center justify-center rounded-[10px] bg-surface-2 text-[13px] text-ink-3">
+                      <div className="flex h-full items-center justify-center bg-surface-2 text-[13px] text-ink-3">
                         Carregando preview...
                       </div>
                     )
@@ -573,23 +576,26 @@ export function ImportPanel() {
                     docxPreviewHtml ? (
                       <iframe
                         srcDoc={docxPreviewHtml}
-                        className="h-full w-full rounded-[10px] border border-line-2 bg-surface"
+                        className="absolute inset-0 h-full w-full border-0 bg-surface"
                         title="Preview DOCX"
                       />
                     ) : (
-                      <div className="flex h-full items-center justify-center rounded-[10px] bg-surface-2 text-[13px] text-ink-3">
+                      <div className="flex h-full items-center justify-center bg-surface-2 text-[13px] text-ink-3">
                         Carregando preview...
                       </div>
                     )
                   ) : (
-                    <div className="flex h-full items-center justify-center rounded-[10px] bg-surface-2 text-[13px] text-ink-3">
+                    <div className="flex h-full items-center justify-center bg-surface-2 text-[13px] text-ink-3">
                       Preview indisponível para este formato
                     </div>
                   )}
                 </div>
               </section>
 
-              <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[14px] border border-line bg-surface">
+              <section
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-line bg-surface"
+                style={{ height: panelHeight, maxHeight: panelHeight }}
+              >
                 <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-4 py-3">
                   <h2 className="text-section">Estrutura identificada</h2>
                   {dirty && (
@@ -603,7 +609,7 @@ export function ImportPanel() {
                     </Button>
                   )}
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto p-3" style={{ height: panelHeight }}>
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
                   {blocos.length > 0 ? (
                     <ul className="space-y-2">
                       {blocos.map((item) => {

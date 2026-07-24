@@ -1572,21 +1572,21 @@ export class NormativeActsService {
       });
     }
 
+    // Não altera etapa editorial: correção só de metadados em “Somente arquivo original”
+    // permanece nesse estágio até o usuário iniciar a estruturação explicitamente.
     await this.prisma.normativeAct.update({
       where: { id },
-      data: {
-        editionOpen: true,
-        ...(act.etapaEditorial === EditorialStage.somente_arquivo_original
-          ? { etapaEditorial: EditorialStage.em_estruturacao }
-          : {}),
-      },
+      data: { editionOpen: true },
     });
 
+    const fileOnly = act.etapaEditorial === EditorialStage.somente_arquivo_original;
     await recordInternalHistory(this.prisma, {
       actId: id,
       userId,
-      acao: 'criar_versao',
-      resumo: 'Abriu nova versão de trabalho a partir da versão publicada',
+      acao: fileOnly ? 'editar_metadados' : 'criar_versao',
+      resumo: fileOnly
+        ? 'Abriu versão de trabalho para correção de metadados (permanece Somente arquivo original)'
+        : 'Abriu nova versão de trabalho a partir da versão publicada',
       withSnapshot: true,
     });
 

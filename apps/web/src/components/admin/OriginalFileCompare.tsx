@@ -29,7 +29,7 @@ export function OriginalFilePane({
   actId: string;
   attachment: ActAttachment;
   className?: string;
-  /** Altura visível do quadro (px). */
+  /** Altura total do quadro (px), incluindo cabeçalho interno. */
   heightPx?: number;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -60,8 +60,14 @@ export function OriginalFilePane({
   }, [actId, attachment.id]);
 
   return (
-    <div className={cn('flex min-h-0 flex-col rounded-[14px] border border-line bg-surface shadow-sm', className)}>
-      <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+    <div
+      className={cn(
+        'flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-line bg-surface shadow-sm',
+        className,
+      )}
+      style={{ height: heightPx, maxHeight: heightPx }}
+    >
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
         <div className="min-w-0">
           <p className="truncate text-[13px] font-semibold text-ink">Arquivo original</p>
           <p className="truncate text-[11px] text-ink-4">{attachment.nome}</p>
@@ -77,22 +83,22 @@ export function OriginalFilePane({
           </a>
         )}
       </div>
-      <div className="min-h-0 flex-1 p-2" style={{ height: heightPx }}>
+      <div className="relative min-h-0 flex-1">
         {loading && (
-          <p className="p-4 text-[13px] text-ink-4">Carregando arquivo…</p>
+          <p className="absolute inset-0 p-4 text-[13px] text-ink-4">Carregando arquivo…</p>
         )}
         {error && !loading && (
-          <p className="p-4 text-[13px] text-danger">{error}</p>
+          <p className="absolute inset-0 p-4 text-[13px] text-danger">{error}</p>
         )}
         {!loading && !error && previewUrl && (kind === 'pdf' || kind === 'other') && (
           <iframe
             title="Arquivo original do ato"
             src={previewUrl}
-            className="h-full w-full rounded-[8px] border border-line-2 bg-white"
+            className="absolute inset-0 h-full w-full border-0 bg-white"
           />
         )}
         {!loading && !error && previewUrl && kind === 'docx' && (
-          <div className="flex h-full flex-col items-center justify-center gap-3 rounded-[8px] border border-dashed border-line-2 bg-surface-2 p-6 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-2 p-6 text-center">
             <FileText className="h-8 w-8 text-ink-4" />
             <p className="text-[13px] text-ink-2">
               Preview embutido indisponível para este formato. Abra o arquivo em nova aba para

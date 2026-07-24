@@ -26,21 +26,30 @@ function SupplementLink({ item }: { item: ActAttachment }) {
   const API_URL = getApiBaseUrl();
   const label = item.titulo || item.nome;
   let href: string | null = null;
-  let external = false;
   if (item.href) {
     href = item.href;
-    external = /^https?:\/\//i.test(item.href);
   } else if (item.downloadUrl) {
     href = item.downloadUrl.startsWith('http')
       ? item.downloadUrl
       : `${API_URL}${item.downloadUrl}`;
   }
-  if (!href) return null;
+  if (!href) {
+    return (
+      <span
+        className="text-[14.5px] text-ink-3"
+        title="O arquivo não pôde ser localizado"
+      >
+        {label} (indisponível)
+      </span>
+    );
+  }
+  // Hiperlinks e arquivos abrem em nova aba; a API decide inline (PDF/imagem) vs download.
   return (
     <a
       href={href}
       className="text-[14.5px] text-[#0066cc] underline hover:opacity-90"
-      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      target="_blank"
+      rel="noopener noreferrer"
     >
       {label}
     </a>
@@ -432,7 +441,9 @@ export function ActContent({ act }: { act: ActDetail }) {
               </a>
             </p>
           ) : (
-            <p className="mt-4 text-[13px] text-ink-3">Arquivo original indisponível no momento.</p>
+            <p className="mt-4 text-[13px] text-ink-3">
+              O arquivo original não pôde ser localizado ou não está disponível para acesso.
+            </p>
           )}
         </section>
       ) : (

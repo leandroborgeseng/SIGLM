@@ -21,6 +21,7 @@ import type { AuthUser } from '../auth/auth.constants';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { setUserFileHeaders } from '../common/file-response';
 import { resolveUploadPath } from '../common/uploads';
 import { AttachmentsService } from './attachments.service';
 
@@ -43,9 +44,8 @@ export class AttachmentsController {
   ) {
     const item = await this.attachments.getFilePath(actId, attachmentId);
     const filePath = resolveUploadPath(item.url);
-    const safeFilename = item.nome.replace(/[^\w.\-() ]/g, '_');
-    res.setHeader('Content-Disposition', `inline; filename="${safeFilename}"`);
-    res.sendFile(path.resolve(filePath));
+    setUserFileHeaders(res, item.nome);
+    return res.sendFile(path.resolve(filePath));
   }
 
   @Post('original')

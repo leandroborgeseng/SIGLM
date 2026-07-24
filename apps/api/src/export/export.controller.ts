@@ -1,8 +1,12 @@
 import * as path from 'path';
-import { Controller, Get, NotFoundException, Param, Res } from '@nestjs/common';
+import { Controller, Get, Param, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import * as fs from 'fs/promises';
 import { Public } from '../auth/auth.constants';
+import {
+  sendAttachmentUnavailable,
+  setUserFileHeaders,
+} from '../common/file-response';
 import { resolveUploadPath } from '../common/uploads';
 import { PrismaService } from '../prisma/prisma.service';
 import { slugFromParams } from '../normative-acts/normative-acts.utils';
@@ -51,10 +55,13 @@ export class ExportController {
       include: { act: { select: { statusPublicacao: true } } },
     });
     if (!attachment || !attachment.ativo || attachment.act.statusPublicacao !== 'publicado') {
-      throw new NotFoundException('Anexo não encontrado');
+      return sendAttachmentUnavailable(
+        res,
+        'O arquivo não pôde ser localizado ou você não possui autorização para acessá-lo.',
+      );
     }
     if (!attachment.url) {
-      throw new NotFoundException('Arquivo não disponível');
+      return sendAttachmentUnavailable(res);
     }
 
     let filePath = resolveUploadPath(attachment.url);
@@ -68,11 +75,10 @@ export class ExportController {
     try {
       await fs.access(filePath);
     } catch {
-      throw new NotFoundException('Arquivo não disponível');
+      return sendAttachmentUnavailable(res);
     }
 
-    const safeFilename = attachment.nome.replace(/[^\w.\-() ]/g, '_');
-    res.setHeader('Content-Disposition', `inline; filename="${safeFilename}"`);
-    res.sendFile(path.resolve(filePath));
+    setUserFileHeaders(res, attachment.nome);
+    return res.sendFile(path.resolve(filePath));
   }
 }

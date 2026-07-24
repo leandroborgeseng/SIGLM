@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   GripVertical,
   History,
   Pencil,
@@ -70,6 +71,7 @@ import {
 } from '@/lib/editor-draft';
 import {
   ACT_TYPE_LABELS,
+  actUrl,
   cn,
   ETAPA_EDITORIAL_LABELS,
   formatFormalTitle,
@@ -785,7 +787,13 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     try {
       const updated = await createActEdition(act.id);
       syncFromAct(updated);
-      toast('Nova versão de trabalho criada — a consulta pública permanece inalterada', 'ok');
+      const fileOnly = updated.etapaEditorial === 'somente_arquivo_original';
+      toast(
+        fileOnly
+          ? 'Versão de trabalho aberta para correção de metadados — a consulta pública permanece inalterada'
+          : 'Nova versão de trabalho criada — a consulta pública permanece inalterada',
+        'ok',
+      );
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao criar versão', 'danger');
@@ -845,6 +853,9 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     (act.statusPublicacao === 'em_revisao' ||
       (act.statusPublicacao === 'publicado' && Boolean(act.editionOpen)) ||
       (act.statusPublicacao === 'rascunho' && isFileOnlyStage));
+  const hasPublicPage =
+    act.statusPublicacao === 'publicado' || Boolean(act.editionOpen);
+  const publicPortalUrl = act.slug ? actUrl(act.slug) : '/legislacao';
 
   const saveStatusLabel =
     saveStatus === 'saving'
@@ -896,10 +907,30 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               <Link href={`/admin/atos/${act.id}/historico`}>
                 <Button variant="ghost" size="sm">
                   <History className="h-3.5 w-3.5" />
-                  Histórico interno
+                  <span className="max-sm:sr-only">Histórico interno</span>
                 </Button>
               </Link>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              disabled={!hasPublicPage}
+              title={
+                !hasPublicPage
+                  ? 'Ato ainda não publicado'
+                  : act.editionOpen
+                    ? 'Abre a última versão publicada (alterações em andamento não aparecem no portal)'
+                    : 'Abrir página pública deste ato em nova aba'
+              }
+              onClick={() => {
+                if (!hasPublicPage) return;
+                window.open(publicPortalUrl, '_blank', 'noopener,noreferrer');
+              }}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              <span className="max-sm:sr-only">Ver no portal público</span>
+            </Button>
             <CompareModeToggle
               active={compareMode}
               hasOriginal={Boolean(originalFile)}
@@ -916,6 +947,14 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               }}
               onExit={() => setCompareMode(false)}
             />
+            {can('acts:version') &&
+              act.statusPublicacao === 'publicado' &&
+              !act.editionOpen &&
+              isFileOnlyStage && (
+                <Button size="sm" variant="outlined" onClick={() => void handleCreateEdition()} disabled={saving}>
+                  Editar metadados
+                </Button>
+              )}
             {can('acts:write') && isFileOnlyStage && (
               <Button size="sm" variant="tonal" onClick={() => void handleStartStructuring()} disabled={saving}>
                 Iniciar estruturação
@@ -925,7 +964,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               act.statusPublicacao === 'publicado' &&
               !act.editionOpen &&
               !isFileOnlyStage && (
-                <Button size="sm" onClick={handleCreateEdition} disabled={saving}>
+                <Button size="sm" onClick={() => void handleCreateEdition()} disabled={saving}>
                   Criar nova versão
                 </Button>
               )}
@@ -957,14 +996,31 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       />
 
       <div className="min-h-0 flex-1 overflow-auto">
-      {act.statusPublicacao === 'publicado' && !act.editionOpen && (
+      {act.statusPublicacao === 'publicado' && !act.editionOpen && isFileOnlyStage && (
+        <div className="mx-6 mt-4 rounded-[10px] border border-line bg-surface-2 px-4 py-3 text-[13px] text-ink-2">
+          Este ato está publicado no estágio <strong>Somente arquivo original</strong>. Para
+          corrigir Tipo, Número, datas, órgãos, anexos e demais metadados, use{' '}
+          <strong>Editar metadados</strong>. Para montar o Texto Estruturado, use{' '}
+          <strong>Iniciar estruturação</strong>. A consulta pública não será alterada até a
+          publicação da correção.
+        </div>
+      )}
+      {act.statusPublicacao === 'publicado' && !act.editionOpen && !isFileOnlyStage && (
         <div className="mx-6 mt-4 rounded-[10px] border border-line bg-surface-2 px-4 py-3 text-[13px] text-ink-2">
           Este ato está publicado. A consulta pública exibe a versão oficial. Para corrigir
           conteúdo ou metadados, use <strong>Criar nova versão</strong> — a versão pública não
           será alterada até a publicação da correção.
         </div>
       )}
-      {act.editionOpen && (
+      {act.editionOpen && isFileOnlyStage && (
+        <div className="mx-6 mt-4 rounded-[10px] border border-brand/30 bg-brand/5 px-4 py-3 text-[13px] text-ink-2">
+          Você está em uma <strong>versão de trabalho para correção de metadados</strong>. O
+          estágio editorial permanece <strong>Somente arquivo original</strong> e o Texto
+          Estruturado fica vazio até você usar <strong>Iniciar estruturação</strong>. A consulta
+          pública continua exibindo a última versão publicada.
+        </div>
+      )}
+      {act.editionOpen && !isFileOnlyStage && (
         <div className="mx-6 mt-4 rounded-[10px] border border-brand/30 bg-brand/5 px-4 py-3 text-[13px] text-ink-2">
           Você está editando uma <strong>versão de trabalho</strong>. A consulta pública continua
           exibindo a última versão publicada até você publicar esta correção.
@@ -1363,21 +1419,23 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
           {compareMode && originalFile && (
             <div
               className={cn(
-                'min-w-0 w-full lg:w-[var(--compare-split)] lg:flex-none',
+                'min-h-0 min-w-0 w-full lg:w-[var(--compare-split)] lg:flex-none',
                 mobilePane !== 'original' && 'max-lg:hidden',
               )}
+              style={{ height: panelHeight, maxHeight: panelHeight }}
             >
               <OriginalFilePane
                 actId={act.id}
                 attachment={originalFile}
                 heightPx={panelHeight}
+                className="h-full"
               />
             </div>
           )}
           <div
             className={cn(
               'min-w-0',
-              compareMode && originalFile && 'w-full flex-1 overflow-y-auto',
+              compareMode && originalFile && 'flex min-h-0 w-full flex-1 flex-col overflow-hidden',
               compareMode && originalFile && mobilePane !== 'texto' && 'max-lg:hidden',
             )}
             style={
@@ -1386,8 +1444,13 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 : undefined
             }
           >
-        <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <section
+          className={cn(
+            'rounded-[14px] border border-line bg-surface p-5 shadow-sm',
+            compareMode && originalFile && 'flex h-full min-h-0 flex-col overflow-hidden',
+          )}
+        >
+          <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
             <h2 className="text-section">Texto estruturado</h2>
             <div
               className={cn(
@@ -1414,10 +1477,15 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
             </div>
           </div>
           {hierarchy.warnings.length > 0 && (
-            <p className="mb-3 text-[12px] text-ink-3">{hierarchy.warnings[0]}</p>
+            <p className="mb-3 shrink-0 text-[12px] text-ink-3">{hierarchy.warnings[0]}</p>
           )}
 
-          <div className="space-y-1.5">
+          <div
+            className={cn(
+              'space-y-1.5',
+              compareMode && originalFile && 'min-h-0 flex-1 overflow-y-auto pr-1',
+            )}
+          >
             {units.map((unit, index) => {
               if (isCollapsedAway(unit, units, collapsed)) return null;
               const childCount = units.filter((u) => u.parentUnitId === unit.id).length;
@@ -1677,7 +1745,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
             <Button
               variant="tonal"
               size="sm"
-              className="mt-4"
+              className="mt-4 shrink-0"
               onClick={() => openAddDialog({ mode: 'end' })}
             >
               <Plus className="h-4 w-4" />
