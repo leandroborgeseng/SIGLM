@@ -1,13 +1,15 @@
 import * as path from 'path';
 import { Controller, Get, Param, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import * as fs from 'fs/promises';
 import { Public } from '../auth/auth.constants';
+import {
+  pathExists,
+  resolveAttachmentAbsolutePath,
+} from '../common/attachment-storage';
 import {
   sendAttachmentUnavailable,
   setUserFileHeaders,
 } from '../common/file-response';
-import { resolveUploadPath } from '../common/uploads';
 import { PrismaService } from '../prisma/prisma.service';
 import { slugFromParams } from '../normative-acts/normative-acts.utils';
 import { ExportService } from './export.service';
@@ -64,17 +66,28 @@ export class ExportController {
       return sendAttachmentUnavailable(res);
     }
 
-    let filePath = resolveUploadPath(attachment.url);
-
+    let importStored: string | null = null;
     if (attachment.url.includes('/api/admin/imports/')) {
       const importId = attachment.url.split('/')[4];
       const imp = await this.prisma.import.findUnique({ where: { id: importId } });
-      if (imp) filePath = resolveUploadPath(imp.arquivo);
+      importStored = imp?.arquivo ?? null;
     }
 
-    try {
-      await fs.access(filePath);
-    } catch {
+    let filePath = resolveAttachmentAbsolutePath(attachment.url, importStored);
+
+    if (!(await pathExists(filePath))) {
+      // Recuperação: importação estruturada vinculada ao ato.
+      const linked = await this.prisma.import.findFirst({
+        where: { actId: attachment.actId },
+        orderBy: { criadoEm: 'desc' },
+      });
+      if (linked?.arquivo) {
+        const src = resolveAttachmentAbsolutePath(linked.arquivo);
+        if (await pathExists(src)) filePath = src;
+      }
+    }
+
+    if (!(await pathExists(filePath))) {
       return sendAttachmentUnavailable(res);
     }
 

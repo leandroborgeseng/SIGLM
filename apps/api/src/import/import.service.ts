@@ -7,7 +7,8 @@ import { ImportFormat, ImportStatus, Prisma, PublicationStatus, EditorialStage, 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
-import { ATTACHMENTS_DIR } from '../common/uploads';
+import { copyToPermanentAttachmentStorage } from '../common/attachment-storage';
+import { UPLOADS_ROOT } from '../common/uploads';
 import { buildActSlug, formatActCode } from '../normative-acts/normative-acts.utils';
 import { recordInternalHistory } from '../normative-acts/act-versioning.utils';
 import { OcrService } from './ocr.service';
@@ -407,6 +408,28 @@ export class ImportService {
         b.parentOrdem == null ? null : (oldOrdemToNew.get(b.parentOrdem) ?? null),
     }));
 
+    // Transferência definitiva do arquivo ANTES de criar o ato (evita cadastro sem original).
+    const importRecord = await this.prisma.import.findUnique({ where: { id: importId } });
+    if (!importRecord?.arquivo) {
+      throw new BadRequestException(
+        'Arquivo da importação não encontrado — não foi possível vincular o original ao ato',
+      );
+    }
+    const sourcePath = path.join(UPLOADS_ROOT, importRecord.arquivo);
+    let permanent;
+    try {
+      permanent = await copyToPermanentAttachmentStorage(
+        sourcePath,
+        importId,
+        imp.arquivoOriginal,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'falha ao copiar';
+      throw new BadRequestException(
+        `Não foi possível transferir o arquivo original para o armazenamento definitivo (${msg})`,
+      );
+    }
+
     const act = await this.prisma.normativeAct.create({
       data: {
         tipo,
@@ -482,25 +505,17 @@ export class ImportService {
       meta.efeitosAceitos,
     );
 
-    const importRecord = await this.prisma.import.findUnique({ where: { id: importId } });
-    if (importRecord) {
-      const safeName = imp.arquivoOriginal.replace(/[^\w.-]/g, '_');
-      const storedName = `${act.id}-${safeName}`;
-      await fs.mkdir(ATTACHMENTS_DIR, { recursive: true });
-      await fs.copyFile(
-        path.join(this.uploadDir, importRecord.arquivo),
-        path.join(ATTACHMENTS_DIR, storedName),
-      );
-      await this.prisma.attachment.create({
-        data: {
-          actId: act.id,
-          tipo: imp.formato === 'pdf_ocr' ? 'digitalizado' : 'pdf_original',
-          url: `attachments/${storedName}`,
-          nome: imp.arquivoOriginal,
-          titulo: 'Arquivo original do ato',
-        },
-      });
-    }
+    await this.prisma.attachment.create({
+      data: {
+        actId: act.id,
+        tipo: imp.formato === 'pdf_ocr' ? 'digitalizado' : 'pdf_original',
+        url: permanent.url,
+        nome: permanent.nome,
+        titulo: 'Arquivo original do ato',
+        tamanho: permanent.tamanho,
+        hash: permanent.hash,
+      },
+    });
 
     await this.prisma.import.update({
       where: { id: importId },

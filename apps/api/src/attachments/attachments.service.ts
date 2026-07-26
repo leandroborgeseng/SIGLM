@@ -1,12 +1,20 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AttachmentType, Prisma, PublicationStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import {
+  copyToPermanentAttachmentStorage,
+  isTemporaryOrLegacyAttachmentUrl,
+  pathExists,
+  resolveAttachmentAbsolutePath,
+  safeStoredFilename,
+} from '../common/attachment-storage';
 import { ATTACHMENTS_DIR } from '../common/uploads';
 import { PrismaService } from '../prisma/prisma.service';
 import { recordInternalHistory } from '../normative-acts/act-versioning.utils';
@@ -19,6 +27,8 @@ const ORIGINAL_TYPES: AttachmentType[] = [
 
 @Injectable()
 export class AttachmentsService {
+  private readonly logger = new Logger(AttachmentsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   private async ensureAct(actId: string) {
@@ -92,7 +102,7 @@ export class AttachmentsService {
 
   private async storeFile(actId: string, file: Express.Multer.File) {
     await fs.mkdir(ATTACHMENTS_DIR, { recursive: true });
-    const safe = file.originalname.replace(/[^\w.\-() ]/g, '_');
+    const safe = safeStoredFilename(file.originalname);
     const storedName = `${actId}-${Date.now()}-${safe}`;
     const fullPath = path.join(ATTACHMENTS_DIR, storedName);
     await fs.writeFile(fullPath, file.buffer);
@@ -102,6 +112,161 @@ export class AttachmentsService {
       nome: file.originalname,
       tamanho: file.size,
       hash,
+    };
+  }
+
+  /**
+   * Localiza o ficheiro físico pelo id estável do anexo.
+   * Se a referência estiver quebrada/temporária e o ficheiro ainda existir
+   * (ex.: Import.arquivo), recopia para o armazenamento definitivo e atualiza o vínculo.
+   */
+  async resolveAttachmentFile(actId: string, attachmentId: string) {
+    const item = await this.prisma.attachment.findFirst({
+      where: { id: attachmentId, actId },
+    });
+    if (!item || !item.url) {
+      this.logger.warn(
+        `Anexo sem referência: actId=${actId} attachmentId=${attachmentId}`,
+      );
+      throw new NotFoundException('Referência de arquivo inválida ou inexistente');
+    }
+
+    let importStored: string | null = null;
+    if (item.url.includes('/api/admin/imports/')) {
+      const importId = item.url.split('/')[4];
+      const imp = await this.prisma.import.findUnique({ where: { id: importId } });
+      importStored = imp?.arquivo ?? null;
+    }
+
+    let absolutePath = resolveAttachmentAbsolutePath(item.url, importStored);
+    if (await pathExists(absolutePath)) {
+      if (isTemporaryOrLegacyAttachmentUrl(item.url)) {
+        const repaired = await this.promoteToPermanent(item, absolutePath);
+        return repaired;
+      }
+      return { absolutePath, nome: item.nome, url: item.url, repaired: false };
+    }
+
+    // Tentativa de recuperação a partir da importação estruturada vinculada ao ato.
+    const linkedImport = await this.prisma.import.findFirst({
+      where: { actId },
+      orderBy: { criadoEm: 'desc' },
+    });
+    if (linkedImport?.arquivo) {
+      const src = resolveAttachmentAbsolutePath(linkedImport.arquivo);
+      if (await pathExists(src)) {
+        this.logger.warn(
+          `Recuperando anexo ${item.id} a partir da importação ${linkedImport.id}`,
+        );
+        return this.promoteToPermanent(item, src);
+      }
+    }
+
+    // Importação de acervo (arquivos em uploads/archive/).
+    const archiveItem = await this.prisma.archiveImportItem.findFirst({
+      where: { OR: [{ actId }, { existingActId: actId }] },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (archiveItem?.arquivo) {
+      const src = path.join(
+        path.dirname(ATTACHMENTS_DIR),
+        'archive',
+        archiveItem.arquivo,
+      );
+      if (await pathExists(src)) {
+        this.logger.warn(
+          `Recuperando anexo ${item.id} a partir do acervo ${archiveItem.id}`,
+        );
+        return this.promoteToPermanent(item, src);
+      }
+    }
+
+    this.logger.error(
+      `Arquivo inexistente no armazenamento: attachmentId=${item.id} url=${item.url} path=${absolutePath}`,
+    );
+    throw new NotFoundException(
+      'Arquivo inexistente no armazenamento. Verifique o vínculo ou substitua o documento.',
+    );
+  }
+
+  private async promoteToPermanent(
+    item: { id: string; actId: string; nome: string; url: string },
+    sourceAbsolutePath: string,
+  ) {
+    const stored = await copyToPermanentAttachmentStorage(
+      sourceAbsolutePath,
+      item.actId,
+      item.nome,
+    );
+    await this.prisma.attachment.update({
+      where: { id: item.id },
+      data: {
+        url: stored.url,
+        tamanho: stored.tamanho,
+        hash: stored.hash,
+      },
+    });
+    this.logger.log(
+      `Anexo ${item.id} promovido para armazenamento definitivo: ${stored.url}`,
+    );
+    return {
+      absolutePath: resolveAttachmentAbsolutePath(stored.url),
+      nome: item.nome,
+      url: stored.url,
+      repaired: true,
+    };
+  }
+
+  /** Verifica e repara anexos originais com referência quebrada ou temporária. */
+  async repairBrokenOriginals() {
+    const originals = await this.prisma.attachment.findMany({
+      where: {
+        ativo: true,
+        tipo: { in: ORIGINAL_TYPES },
+        url: { not: '' },
+      },
+      select: {
+        id: true,
+        actId: true,
+        nome: true,
+        url: true,
+        act: { select: { slug: true, tipo: true, numero: true, ano: true } },
+      },
+    });
+
+    const report: {
+      repaired: { id: string; actId: string; slug: string; newUrl: string }[];
+      missing: { id: string; actId: string; slug: string; url: string; motivo: string }[];
+      ok: number;
+    } = { repaired: [], missing: [], ok: 0 };
+
+    for (const item of originals) {
+      try {
+        const resolved = await this.resolveAttachmentFile(item.actId, item.id);
+        if (resolved.repaired) {
+          report.repaired.push({
+            id: item.id,
+            actId: item.actId,
+            slug: item.act.slug,
+            newUrl: resolved.url,
+          });
+        } else {
+          report.ok += 1;
+        }
+      } catch (e) {
+        report.missing.push({
+          id: item.id,
+          actId: item.actId,
+          slug: item.act.slug,
+          url: item.url,
+          motivo: e instanceof Error ? e.message : 'Falha ao localizar arquivo',
+        });
+      }
+    }
+
+    return {
+      total: originals.length,
+      ...report,
     };
   }
 
@@ -387,10 +552,11 @@ export class AttachmentsService {
   }
 
   async getFilePath(actId: string, attachmentId: string) {
-    const item = await this.prisma.attachment.findFirst({
-      where: { id: attachmentId, actId },
-    });
-    if (!item || !item.url) throw new NotFoundException('Arquivo não encontrado');
-    return item;
+    const resolved = await this.resolveAttachmentFile(actId, attachmentId);
+    return {
+      url: resolved.url,
+      nome: resolved.nome,
+      absolutePath: resolved.absolutePath,
+    };
   }
 }

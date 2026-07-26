@@ -16,6 +16,7 @@ import { Input, Select } from '@/components/ui/Form';
 import { useToast } from '@/components/ui/Toast';
 import {
   createActSupplement,
+  fetchActAttachmentFileUrl,
   listActAttachments,
   removeActSupplement,
   reorderActSupplements,
@@ -26,6 +27,11 @@ import {
 } from '@/lib/admin-api';
 import { getApiBaseUrl } from '@/lib/api-url';
 import type { ActAttachment } from '@/lib/types';
+
+async function openAdminAttachment(actId: string, attachmentId: string) {
+  const url = await fetchActAttachmentFileUrl(actId, attachmentId);
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 
 function resolveDirectLink(item: ActAttachment): string {
   const API_URL = getApiBaseUrl();
@@ -210,12 +216,9 @@ function SupplementSection({
                     <Copy className="h-3 w-3" />
                     Copiar link direto
                   </button>
-                  {(item.adminDownloadUrl || item.href || item.downloadUrl) && (
+                  {item.href ? (
                     <a
-                      href={
-                        item.href ??
-                        `${getApiBaseUrl()}${item.adminDownloadUrl ?? item.downloadUrl}`
-                      }
+                      href={item.href}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-3 hover:text-brand"
@@ -223,7 +226,23 @@ function SupplementSection({
                       <ExternalLink className="h-3 w-3" />
                       Abrir
                     </a>
-                  )}
+                  ) : item.url ? (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-3 hover:text-brand"
+                      onClick={() => {
+                        void openAdminAttachment(actId, item.id).catch((e) =>
+                          toast(
+                            e instanceof Error ? e.message : 'Falha ao abrir arquivo',
+                            'danger',
+                          ),
+                        );
+                      }}
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Abrir
+                    </button>
+                  ) : null}
                   {editable && (
                     <>
                       <button
@@ -396,7 +415,12 @@ export function ActMetadataAttachments({
   const publicacao = bundle?.publicacao ?? null;
   const historico = bundle?.historico ?? [];
   const historicoPublicacao = bundle?.historicoPublicacao ?? [];
-  const API_URL = getApiBaseUrl();
+
+  const openFile = (attachmentId: string) => {
+    void openAdminAttachment(actId, attachmentId).catch((e) =>
+      toast(e instanceof Error ? e.message : 'Falha ao abrir arquivo', 'danger'),
+    );
+  };
 
   return (
     <div className="space-y-4 border-t border-line pt-4">
@@ -406,14 +430,13 @@ export function ActMetadataAttachments({
           <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2 text-[12.5px]">
             <p className="font-medium text-ink">{original.nome}</p>
             <div className="mt-1.5 flex flex-wrap gap-2">
-              <a
-                href={`${API_URL}${original.adminDownloadUrl ?? original.downloadUrl}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
                 className="text-brand hover:underline"
+                onClick={() => openFile(original.id)}
               >
                 Abrir / conferir
-              </a>
+              </button>
               {editable && (
                 <label className="cursor-pointer text-ink-3 hover:text-brand">
                   <span className="inline-flex items-center gap-1">
@@ -474,14 +497,13 @@ export function ActMetadataAttachments({
                       substituído em {new Date(h.substituidoEm).toLocaleString('pt-BR')}
                     </span>
                   )}
-                  <a
-                    href={`${API_URL}${h.adminDownloadUrl ?? h.downloadUrl}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
                     className="text-brand hover:underline"
+                    onClick={() => openFile(h.id)}
                   >
                     Abrir
-                  </a>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -496,14 +518,13 @@ export function ActMetadataAttachments({
             <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2 text-[12.5px]">
               <p className="font-medium text-ink">{publicacao.nome}</p>
               <div className="mt-1.5 flex flex-wrap gap-2">
-                <a
-                  href={`${API_URL}${publicacao.adminDownloadUrl ?? publicacao.downloadUrl}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
                   className="text-brand hover:underline"
+                  onClick={() => openFile(publicacao.id)}
                 >
                   Abrir / conferir
-                </a>
+                </button>
                 {editable && (
                   <label className="cursor-pointer text-ink-3 hover:text-brand">
                     <span className="inline-flex items-center gap-1">
@@ -566,14 +587,13 @@ export function ActMetadataAttachments({
                         substituído em {new Date(h.substituidoEm).toLocaleString('pt-BR')}
                       </span>
                     )}
-                    <a
-                      href={`${API_URL}${h.adminDownloadUrl ?? h.downloadUrl}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
                       className="text-brand hover:underline"
+                      onClick={() => openFile(h.id)}
                     >
                       Abrir
-                    </a>
+                    </button>
                   </li>
                 ))}
               </ul>

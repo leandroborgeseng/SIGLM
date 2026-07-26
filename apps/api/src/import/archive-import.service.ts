@@ -14,7 +14,7 @@ import {
 } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ATTACHMENTS_DIR } from '../common/uploads';
+import { copyToPermanentAttachmentStorage } from '../common/attachment-storage';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildActSlug, formatActCode } from '../normative-acts/normative-acts.utils';
 import { recordInternalHistory } from '../normative-acts/act-versioning.utils';
@@ -596,10 +596,15 @@ export class ArchiveImportService {
     userId: string,
   ) {
     const src = path.join(this.uploadDir, item.arquivo);
-    const safeName = item.nomeArquivo.replace(/[^\w.-]/g, '_');
-    const storedName = `${actId}-${Date.now()}-${safeName}`;
-    await fs.mkdir(ATTACHMENTS_DIR, { recursive: true });
-    await fs.copyFile(src, path.join(ATTACHMENTS_DIR, storedName));
+    let permanent;
+    try {
+      permanent = await copyToPermanentAttachmentStorage(src, actId, item.nomeArquivo);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'falha ao copiar';
+      throw new BadRequestException(
+        `Não foi possível transferir o arquivo original para o armazenamento definitivo (${msg})`,
+      );
+    }
 
     await this.prisma.attachment.updateMany({
       where: {
@@ -617,9 +622,11 @@ export class ArchiveImportService {
           item.formato === ImportFormat.pdf_ocr
             ? AttachmentType.digitalizado
             : AttachmentType.pdf_original,
-        url: `attachments/${storedName}`,
-        nome: item.nomeArquivo,
+        url: permanent.url,
+        nome: permanent.nome,
         titulo: 'Arquivo original do ato',
+        tamanho: permanent.tamanho,
+        hash: permanent.hash,
       },
     });
 

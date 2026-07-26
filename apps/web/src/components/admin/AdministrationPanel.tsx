@@ -20,6 +20,7 @@ import {
   listRoles,
   listSignatories,
   listUsers,
+  repairOriginalAttachments,
   restoreSystemBackup,
   setRolePermissions,
   updateOrgan,
@@ -141,7 +142,28 @@ function BackupTab() {
   const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+
+  const onRepairOriginals = async () => {
+    setRepairing(true);
+    try {
+      const report = await repairOriginalAttachments();
+      const parts = [
+        `${report.ok} ok`,
+        `${report.repaired.length} reparado(s)`,
+        `${report.missing.length} sem arquivo`,
+      ];
+      toast(
+        `Verificação de arquivos originais: ${parts.join(' · ')} (total ${report.total})`,
+        report.missing.length ? 'warn' : 'ok',
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erro ao verificar anexos', 'danger');
+    } finally {
+      setRepairing(false);
+    }
+  };
 
   const onExport = async () => {
     setExporting(true);
@@ -191,6 +213,31 @@ function BackupTab() {
           Disponível apenas para o perfil <strong>Administrador geral</strong>.
         </p>
       </div>
+
+      <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <Download className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[15px] font-semibold text-ink">
+              Verificar arquivos originais
+            </h3>
+            <p className="mt-1 text-[13.5px] text-ink-3">
+              Localiza vínculos quebrados ou temporários. Se o documento ainda existir no
+              armazenamento (importação/acervo), o vínculo permanente é corrigido
+              automaticamente.
+            </p>
+            <Button
+              className="mt-4"
+              size="sm"
+              variant="outlined"
+              onClick={() => void onRepairOriginals()}
+              disabled={repairing || exporting || restoring}
+            >
+              {repairing ? 'Verificando…' : 'Verificar e reparar vínculos'}
+            </Button>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
         <div className="flex items-start gap-3">

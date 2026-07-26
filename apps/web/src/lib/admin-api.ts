@@ -709,29 +709,65 @@ export function updateImportStructure(
   });
 }
 
-export async function fetchImportFileUrl(importId: string): Promise<string> {
+async function fetchAuthorizedBlobUrl(
+  path: string,
+  fallbackMessage: string,
+): Promise<string> {
   const API_URL = getApiBaseUrl();
-  const token = readClientToken();
-  const res = await fetch(`${API_URL}/admin/imports/${importId}/file`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) throw new Error('Não foi possível carregar o arquivo');
+  let res: Response;
+  try {
+    res = await authorizedFetch(`${API_URL}${path}`);
+  } catch {
+    throw new Error('Falha temporária de conexão ao carregar o arquivo');
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new AuthError(
+      res.status === 401
+        ? 'Sessão expirada — tente novamente para renovar o acesso'
+        : 'Sem permissão para acessar este arquivo',
+    );
+  }
+  if (res.status === 404) {
+    const body = await res.json().catch(() => ({}));
+    const msg = Array.isArray(body.message)
+      ? body.message.join(', ')
+      : typeof body.message === 'string'
+        ? body.message
+        : 'Arquivo inexistente no armazenamento';
+    throw new Error(msg);
+  }
+  if (!res.ok) {
+    throw new Error(fallbackMessage);
+  }
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }
 
+export async function fetchImportFileUrl(importId: string): Promise<string> {
+  return fetchAuthorizedBlobUrl(
+    `/admin/imports/${importId}/file`,
+    'Não foi possível carregar o arquivo da importação',
+  );
+}
+
+/** Obtém URL blob atualizada do anexo permanente (renova sessão se necessário). */
 export async function fetchActAttachmentFileUrl(
   actId: string,
   attachmentId: string,
 ): Promise<string> {
-  const API_URL = getApiBaseUrl();
-  const token = readClientToken();
-  const res = await fetch(`${API_URL}/admin/acts/${actId}/attachments/${attachmentId}/file`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) throw new Error('Não foi possível carregar o arquivo original');
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
+  return fetchAuthorizedBlobUrl(
+    `/admin/acts/${actId}/attachments/${attachmentId}/file`,
+    'Não foi possível carregar o arquivo original',
+  );
+}
+
+export function repairOriginalAttachments() {
+  return adminFetch<{
+    total: number;
+    ok: number;
+    repaired: { id: string; actId: string; slug: string; newUrl: string }[];
+    missing: { id: string; actId: string; slug: string; url: string; motivo: string }[];
+  }>('/admin/attachments/repair-originals', { method: 'POST' });
 }
 
 export type ArchiveImportItem = {

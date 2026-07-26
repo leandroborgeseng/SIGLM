@@ -22,7 +22,6 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { setUserFileHeaders } from '../common/file-response';
-import { resolveUploadPath } from '../common/uploads';
 import { AttachmentsService } from './attachments.service';
 
 @Controller('admin/acts/:actId/attachments')
@@ -43,9 +42,8 @@ export class AttachmentsController {
     @Res() res: Response,
   ) {
     const item = await this.attachments.getFilePath(actId, attachmentId);
-    const filePath = resolveUploadPath(item.url);
     setUserFileHeaders(res, item.nome);
-    return res.sendFile(path.resolve(filePath));
+    return res.sendFile(path.resolve(item.absolutePath));
   }
 
   @Post('original')
@@ -149,5 +147,24 @@ export class AttachmentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.attachments.removeSupplement(actId, attachmentId, user.id);
+  }
+}
+
+/** Manutenção de vínculos de arquivos (fora do escopo de um ato específico). */
+@Controller('admin/attachments')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+export class AttachmentsMaintenanceController {
+  constructor(private readonly attachments: AttachmentsService) {}
+
+  @Get('integrity')
+  @RequirePermissions('users:manage')
+  integrity() {
+    return this.attachments.repairBrokenOriginals();
+  }
+
+  @Post('repair-originals')
+  @RequirePermissions('users:manage')
+  repair() {
+    return this.attachments.repairBrokenOriginals();
   }
 }
