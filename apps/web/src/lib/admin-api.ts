@@ -1,5 +1,5 @@
 import type { ActAttachment, ActDetail, AdminListResponse, LegislativeEffect } from './types';
-import { AuthError } from './api';
+import { AuthError, ForbiddenError } from './api';
 import { getApiBaseUrl } from './api-url';
 import {
   authorizedFetch,
@@ -51,7 +51,7 @@ async function adminFetch<T>(
     throw new Error('Não foi possível conectar à API');
   }
   if (res.status === 401) throw new AuthError('Não autenticado');
-  if (res.status === 403) throw new AuthError('Permissão insuficiente');
+  if (res.status === 403) throw new ForbiddenError('Permissão insuficiente');
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = Array.isArray(err.message) ? err.message.join(', ') : err.message;
@@ -404,18 +404,18 @@ export async function createActSupplement(
   },
 ): Promise<ActAttachment> {
   const API_URL = getApiBaseUrl();
-  const token = readClientToken();
   const form = new FormData();
   form.append('secao', data.secao);
   form.append('titulo', data.titulo);
   form.append('modo', data.modo);
   if (data.href) form.append('href', data.href);
   if (data.file) form.append('file', data.file);
-  const res = await fetch(`${API_URL}/admin/acts/${actId}/attachments/supplements`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  });
+  const res = await authorizedFetch(
+    `${API_URL}/admin/acts/${actId}/attachments/supplements`,
+    { method: 'POST', body: form },
+  );
+  if (res.status === 401) throw new AuthError('Não autenticado');
+  if (res.status === 403) throw new ForbiddenError('Permissão insuficiente');
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message ?? 'Erro ao criar item');
@@ -628,14 +628,14 @@ export interface ImportDetail {
 
 export async function uploadImport(file: File): Promise<ImportDetail> {
   const API_URL = getApiBaseUrl();
-  const token = readClientToken();
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_URL}/admin/imports/upload`, {
+  const res = await authorizedFetch(`${API_URL}/admin/imports/upload`, {
     method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
   });
+  if (res.status === 401) throw new AuthError('Não autenticado');
+  if (res.status === 403) throw new ForbiddenError('Permissão insuficiente');
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message ?? 'Erro no upload');

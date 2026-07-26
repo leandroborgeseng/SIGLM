@@ -127,7 +127,10 @@ export function OriginalFilePane({
                 variant="ghost"
                 onClick={() => {
                   void fetchActAttachmentFileUrl(actId, attachment.id)
-                    .then((url) => window.open(url, '_blank', 'noopener,noreferrer'))
+                    .then((url) => {
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                    })
                     .catch(() => undefined);
                 }}
               >

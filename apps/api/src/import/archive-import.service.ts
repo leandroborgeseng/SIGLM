@@ -550,32 +550,58 @@ export class ArchiveImportService {
     // Cópia definitiva ANTES de criar o ato — evita cadastro órfão sem arquivo.
     const permanent = await this.copyOriginalToPermanent(item);
 
-    const act = await this.prisma.normativeAct.create({
-      data: {
-        tipo,
-        numero,
-        ano,
-        ementa,
-        dataAto: dataAto ?? undefined,
-        slug,
-        orgaoOrigem: 'Importação de acervo',
-        statusPublicacao: PublicationStatus.rascunho,
-        etapaEditorial: EditorialStage.somente_arquivo_original,
-      },
-    });
+    const act = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.normativeAct.create({
+        data: {
+          tipo,
+          numero,
+          ano,
+          ementa,
+          dataAto: dataAto ?? undefined,
+          slug,
+          orgaoOrigem: 'Importação de acervo',
+          statusPublicacao: PublicationStatus.rascunho,
+          etapaEditorial: EditorialStage.somente_arquivo_original,
+        },
+      });
 
-    await this.linkPermanentOriginal(act.id, item, permanent, userId);
+      await tx.attachment.updateMany({
+        where: {
+          actId: created.id,
+          tipo: { in: [AttachmentType.pdf_original, AttachmentType.digitalizado] },
+          ativo: true,
+        },
+        data: { ativo: false, substituidoEm: new Date(), tipo: AttachmentType.arquivo_historico },
+      });
 
-    await this.prisma.archiveImportItem.update({
-      where: { id: itemId },
-      data: {
-        status: ArchiveImportItemStatus.confirmado,
-        actId: act.id,
-        resolucao: resolucao || 'create',
-        numero,
-        ano,
-        tipo,
-      },
+      await tx.attachment.create({
+        data: {
+          actId: created.id,
+          tipo:
+            item.formato === ImportFormat.pdf_ocr
+              ? AttachmentType.digitalizado
+              : AttachmentType.pdf_original,
+          url: permanent.url,
+          nome: permanent.nome,
+          titulo: 'Arquivo original do ato',
+          tamanho: permanent.tamanho,
+          hash: permanent.hash,
+        },
+      });
+
+      await tx.archiveImportItem.update({
+        where: { id: itemId },
+        data: {
+          status: ArchiveImportItemStatus.confirmado,
+          actId: created.id,
+          resolucao: resolucao || 'create',
+          numero,
+          ano,
+          tipo,
+        },
+      });
+
+      return created;
     });
 
     await recordInternalHistory(this.prisma, {

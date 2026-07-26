@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ExternalLink, GitMerge, Pencil, Upload, X } from 'lucide-react';
 import { AdminTopbar, KpiCard } from '@/components/admin/AdminShell';
 import { NewActButton } from '@/components/admin/NewActButton';
@@ -55,9 +55,11 @@ export function ActsListPanel({ initial }: { initial: AdminListResponse }) {
   const [draft, setDraft] = useState<Filters>(EMPTY);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const loadSeq = useRef(0);
 
   const load = useCallback(
     async (f: Filters, p: number) => {
+      const seq = ++loadSeq.current;
       setLoading(true);
       try {
         const next = await adminListActs({
@@ -71,12 +73,14 @@ export function ActsListPanel({ initial }: { initial: AdminListResponse }) {
           page: p,
           limit: 20,
         });
+        if (seq !== loadSeq.current) return;
         setData(next);
         setPage(p);
       } catch (e) {
+        if (seq !== loadSeq.current) return;
         toast(e instanceof Error ? e.message : 'Erro ao filtrar atos', 'danger');
       } finally {
-        setLoading(false);
+        if (seq === loadSeq.current) setLoading(false);
       }
     },
     [toast],

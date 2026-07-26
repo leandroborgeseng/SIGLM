@@ -106,6 +106,7 @@ interface EditorAct extends ActDetail {
   editionOpen?: boolean;
   hierarchyValid?: boolean;
   observacoesInternas?: string | null;
+  updatedAt?: string;
 }
 
 type PrefixoTituloModo = 'none' | 'auto' | 'manual';
@@ -636,17 +637,29 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     units,
   ]);
 
+  const savingRef = useRef(false);
+  const saveGenRef = useRef(0);
+
   const handleSave = async (opts?: { silent?: boolean; auto?: boolean }) => {
+    if (savingRef.current) return;
     const silent = Boolean(opts?.silent);
     const auto = Boolean(opts?.auto);
+    const gen = ++saveGenRef.current;
+    const fpBefore = fingerprint(currentMeta());
+    savingRef.current = true;
     setSaving(true);
     setSaveStatus(auto ? 'autosaving' : 'saving');
     try {
       await updateAct(act.id, metaPayload());
       const updated = await persistUnits();
-      syncFromAct(updated);
-      clearEditorDraft(act.id);
-      setSaveStatus('saved');
+      // Só sincroniza se o usuário não editou durante o await.
+      if (gen === saveGenRef.current && fingerprint(currentMeta()) === fpBefore) {
+        syncFromAct(updated);
+        clearEditorDraft(act.id);
+        setSaveStatus('saved');
+      } else {
+        setSaveStatus('unsaved');
+      }
       if (!silent) {
         toast(auto ? 'Salvo automaticamente' : 'Alterações salvas', 'ok');
         if (!auto) router.refresh();
@@ -659,9 +672,13 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
           try {
             await updateAct(act.id, metaPayload());
             const updated = await persistUnits();
-            syncFromAct(updated);
-            clearEditorDraft(act.id);
-            setSaveStatus('saved');
+            if (gen === saveGenRef.current && fingerprint(currentMeta()) === fpBefore) {
+              syncFromAct(updated);
+              clearEditorDraft(act.id);
+              setSaveStatus('saved');
+            } else {
+              setSaveStatus('unsaved');
+            }
             if (!silent) toast('Alterações salvas', 'ok');
             return;
           } catch {
@@ -678,6 +695,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       setSaveStatus('error');
       toast(e instanceof Error ? e.message : 'Erro ao salvar — alterações mantidas na tela', 'danger');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -698,12 +716,32 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       void handleSave({ silent: true, auto: true });
     }, 180_000);
     return () => window.clearTimeout(t);
+    // Reinicia o timer quando qualquer campo do fingerprint muda (evita autosave stale).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, editable, assunto, dataAto, units, orgaoOrigemIds]);
+  }, [
+    dirty,
+    editable,
+    assunto,
+    dataAto,
+    dataPublicacao,
+    meioPublicacaoId,
+    orgaoOrigemIds,
+    atoConjunto,
+    prefixoTituloModo,
+    prefixoTitulo,
+    signatories,
+    units,
+  ]);
 
   useEffect(() => {
     const draft = loadEditorDraft(act.id);
     if (!draft || !editable) return;
+    const serverUpdated = act.updatedAt ? new Date(act.updatedAt).getTime() : 0;
+    const draftSaved = draft.savedAt ? new Date(draft.savedAt).getTime() : 0;
+    if (serverUpdated && draftSaved && draftSaved < serverUpdated) {
+      clearEditorDraft(act.id);
+      return;
+    }
     const serverFp = fingerprint(metaFromAct(act, act.units));
     const draftFp = fingerprint({
       assunto: draft.assunto,
@@ -724,7 +762,10 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     const ok = window.confirm(
       'Há um rascunho local não salvo deste ato (ex.: após falha de sessão). Deseja recuperá-lo?',
     );
-    if (!ok) return;
+    if (!ok) {
+      clearEditorDraft(act.id);
+      return;
+    }
     setAssunto(draft.assunto);
     setDataAto(draft.dataAto);
     setDataPublicacao(draft.dataPublicacao);
@@ -785,6 +826,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     }
     setSaving(true);
     try {
+      clearEditorDraft(act.id);
       const updated = await createActEdition(act.id);
       syncFromAct(updated);
       const fileOnly = updated.etapaEditorial === 'somente_arquivo_original';
@@ -808,6 +850,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     }
     setSaving(true);
     try {
+      clearEditorDraft(act.id);
       const updated = await startActStructuring(act.id);
       syncFromAct(updated);
       toast('Estruturação iniciada — use Comparar com arquivo original para montar o texto', 'ok');

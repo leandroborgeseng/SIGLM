@@ -422,23 +422,28 @@ export class NormativeActsService {
           // Snapshot sem IDs: evita vazar órgãos da versão de trabalho.
           publicOrgaos = [];
         }
-        if (Array.isArray(snap.attachments)) {
-          publicAttachments = snap.attachments.map((a) => ({
-            id: a.id,
-            actId: act.id,
-            tipo: a.tipo as (typeof act.attachments)[number]['tipo'],
-            url: a.url,
-            nome: a.nome,
-            titulo: a.titulo,
-            href: a.href,
-            ordem: a.ordem,
-            ativo: a.ativo,
-            tamanho: null,
-            hash: null,
-            criadoEm: act.createdAt,
-            substituidoEm: null,
-          })) as typeof act.attachments;
-        }
+        // Sempre isolar anexos do snapshot (lista vazia = nenhum anexo público).
+        publicAttachments = Array.isArray(snap.attachments)
+          ? (snap.attachments.map((a) => ({
+              id: a.id,
+              actId: act.id,
+              tipo: a.tipo as (typeof act.attachments)[number]['tipo'],
+              url: a.url,
+              nome: a.nome,
+              titulo: a.titulo,
+              href: a.href,
+              ordem: a.ordem,
+              ativo: a.ativo,
+              tamanho: null,
+              hash: null,
+              criadoEm: act.createdAt,
+              substituidoEm: null,
+            })) as typeof act.attachments)
+          : [];
+      } else {
+        // editionOpen sem snapshot: não vazar WIP — conteúdo público vazio seguro.
+        publicUnits = [];
+        publicAttachments = [];
       }
     }
 
@@ -515,11 +520,12 @@ export class NormativeActsService {
       sigla: l.orgao.sigla,
       ordem: l.ordem,
     }));
-    if (!orgaosOrigem.length && (act.orgao || publicOrgao)) {
+    // Com editionOpen, não usar órgãos live (WIP). Só o texto do snapshot.
+    if (!orgaosOrigem.length && publicOrgao) {
       orgaosOrigem.push({
-        id: act.orgao?.id ?? act.orgaoOrigemId ?? '',
-        nome: act.orgao?.nome ?? publicOrgao ?? '',
-        sigla: act.orgao?.sigla ?? null,
+        id: act.editionOpen ? '' : (act.orgao?.id ?? act.orgaoOrigemId ?? ''),
+        nome: publicOrgao,
+        sigla: act.editionOpen ? null : (act.orgao?.sigla ?? null),
         ordem: 0,
       });
     }
@@ -536,8 +542,13 @@ export class NormativeActsService {
       orgaosOrigem,
     );
 
+    // DTO público explícito — não espalhar `act` (evita vazar observacoesInternas, editionOpen, etc.).
     return {
-      ...act,
+      id: act.id,
+      tipo: act.tipo,
+      numero: act.numero,
+      ano: act.ano,
+      slug: act.slug,
       ementa: publicEmenta,
       assunto: publicAssunto,
       dataAto: publicDataAto,
@@ -567,11 +578,6 @@ export class NormativeActsService {
       etapaEditorial: act.etapaEditorial,
       /** Há texto estruturado na versão pública (não apenas arquivo original). */
       textoEstruturadoDisponivel: unitsWithNotes.length > 0,
-      changesAsAlterada: undefined,
-      orgao: undefined,
-      originOrgs: undefined,
-      signatories: undefined,
-      editionOpen: undefined,
     };
   }
 

@@ -10,6 +10,7 @@ import {
   sendAttachmentUnavailable,
   setUserFileHeaders,
 } from '../common/file-response';
+import type { ActSnapshot } from '../normative-acts/act-versioning.utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { slugFromParams } from '../normative-acts/normative-acts.utils';
 import { ExportService } from './export.service';
@@ -54,29 +55,63 @@ export class ExportController {
   async attachmentFile(@Param('id') id: string, @Res() res: Response) {
     const attachment = await this.prisma.attachment.findUnique({
       where: { id },
-      include: { act: { select: { statusPublicacao: true } } },
+      include: {
+        act: { select: { statusPublicacao: true, editionOpen: true } },
+      },
     });
-    if (!attachment || !attachment.ativo || attachment.act.statusPublicacao !== 'publicado') {
+    if (!attachment || attachment.act.statusPublicacao !== 'publicado') {
       return sendAttachmentUnavailable(
         res,
         'O arquivo não pôde ser localizado ou você não possui autorização para acessá-lo.',
       );
     }
-    if (!attachment.url) {
+
+    // Com versão de trabalho aberta, só anexos da revisão pública corrente.
+    // Sem editionOpen, só anexos ativos.
+    if (attachment.act.editionOpen) {
+      const rev = await this.prisma.actPublicRevision.findFirst({
+        where: { actId: attachment.actId, isCurrent: true },
+      });
+      const snap = rev?.snapshot as ActSnapshot | null;
+      const allowed = new Set((snap?.attachments ?? []).map((a) => a.id));
+      if (!allowed.has(id)) {
+        return sendAttachmentUnavailable(
+          res,
+          'O arquivo não pôde ser localizado ou você não possui autorização para acessá-lo.',
+        );
+      }
+    } else if (!attachment.ativo) {
+      return sendAttachmentUnavailable(
+        res,
+        'O arquivo não pôde ser localizado ou você não possui autorização para acessá-lo.',
+      );
+    }
+
+    // Preferir URL do snapshot (caso o live tenha sido movido/substituído).
+    let storedUrl = attachment.url;
+    if (attachment.act.editionOpen) {
+      const rev = await this.prisma.actPublicRevision.findFirst({
+        where: { actId: attachment.actId, isCurrent: true },
+      });
+      const snap = rev?.snapshot as ActSnapshot | null;
+      const fromSnap = snap?.attachments?.find((a) => a.id === id);
+      if (fromSnap?.url) storedUrl = fromSnap.url;
+    }
+
+    if (!storedUrl) {
       return sendAttachmentUnavailable(res);
     }
 
     let importStored: string | null = null;
-    if (attachment.url.includes('/api/admin/imports/')) {
-      const importId = attachment.url.split('/')[4];
+    if (storedUrl.includes('/api/admin/imports/')) {
+      const importId = storedUrl.split('/')[4];
       const imp = await this.prisma.import.findUnique({ where: { id: importId } });
       importStored = imp?.arquivo ?? null;
     }
 
-    let filePath = resolveAttachmentAbsolutePath(attachment.url, importStored);
+    let filePath = resolveAttachmentAbsolutePath(storedUrl, importStored);
 
     if (!(await pathExists(filePath))) {
-      // Recuperação: importação estruturada vinculada ao ato.
       const linked = await this.prisma.import.findFirst({
         where: { actId: attachment.actId },
         orderBy: { criadoEm: 'desc' },

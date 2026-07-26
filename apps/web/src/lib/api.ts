@@ -21,7 +21,7 @@ async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   if (res.status === 401) throw new AuthError('Não autenticado');
-  if (res.status === 403) throw new AuthError('Permissão insuficiente');
+  if (res.status === 403) throw new ForbiddenError('Permissão insuficiente');
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
   return res.json() as Promise<T>;
 }
@@ -30,6 +30,13 @@ export class AuthError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AuthError';
+  }
+}
+
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenError';
   }
 }
 
