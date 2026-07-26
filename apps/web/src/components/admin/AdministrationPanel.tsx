@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
@@ -145,10 +146,31 @@ function BackupTab() {
   const [repairing, setRepairing] = useState(false);
   const [confirmText, setConfirmText] = useState('');
 
+  const [repairReport, setRepairReport] = useState<{
+    total: number;
+    ok: number;
+    repaired: { actId: string; slug: string; newUrl: string }[];
+    missing: { actId: string; slug: string; motivo: string }[];
+  } | null>(null);
+
   const onRepairOriginals = async () => {
     setRepairing(true);
     try {
       const report = await repairOriginalAttachments();
+      setRepairReport({
+        total: report.total,
+        ok: report.ok,
+        repaired: report.repaired.map((r) => ({
+          actId: r.actId,
+          slug: r.slug,
+          newUrl: r.newUrl,
+        })),
+        missing: report.missing.map((m) => ({
+          actId: m.actId,
+          slug: m.slug,
+          motivo: m.motivo,
+        })),
+      });
       const parts = [
         `${report.ok} ok`,
         `${report.repaired.length} reparado(s)`,
@@ -235,6 +257,47 @@ function BackupTab() {
             >
               {repairing ? 'Verificando…' : 'Verificar e reparar vínculos'}
             </Button>
+            {repairReport && (
+              <div className="mt-4 space-y-2 rounded-[10px] border border-line bg-surface-2 px-3 py-3 text-[12.5px]">
+                <p className="font-medium text-ink">
+                  Resultado: {repairReport.ok} ok · {repairReport.repaired.length}{' '}
+                  reparado(s) · {repairReport.missing.length} sem arquivo
+                </p>
+                {repairReport.repaired.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-ok">
+                      Reparados
+                    </p>
+                    <ul className="mt-1 max-h-28 space-y-0.5 overflow-y-auto font-mono text-[11.5px] text-ink-2">
+                      {repairReport.repaired.map((r) => (
+                        <li key={r.actId}>{r.slug}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {repairReport.missing.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-danger">
+                      Sem arquivo — regularizar (substituir no editor)
+                    </p>
+                    <ul className="mt-1 max-h-36 space-y-1 overflow-y-auto text-[11.5px] text-ink-2">
+                      {repairReport.missing.map((m) => (
+                        <li key={m.actId}>
+                          <Link
+                            href={`/admin/atos/${m.actId}/editor`}
+                            className="font-mono text-brand hover:underline"
+                            title={m.motivo}
+                          >
+                            {m.slug}
+                          </Link>
+                          <span className="ml-1 text-ink-4">— {m.motivo}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>

@@ -1429,6 +1429,22 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 attachment={originalFile}
                 heightPx={panelHeight}
                 className="h-full"
+                onReplaceRequest={
+                  editable && can('acts:write')
+                    ? () => {
+                        setCompareMode(false);
+                        toast(
+                          'Use Substituir em Metadados → Arquivo original do ato',
+                          'warn',
+                        );
+                        window.setTimeout(() => {
+                          document
+                            .getElementById('act-original-file')
+                            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 50);
+                      }
+                    : undefined
+                }
               />
             </div>
           )}

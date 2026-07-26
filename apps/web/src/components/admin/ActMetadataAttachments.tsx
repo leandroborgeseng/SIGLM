@@ -424,7 +424,7 @@ export function ActMetadataAttachments({
 
   return (
     <div className="space-y-4 border-t border-line pt-4">
-      <div>
+      <div id="act-original-file">
         <label className="mb-1 block text-[12px] text-ink-3">Arquivo original do ato</label>
         {original ? (
           <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2 text-[12.5px]">

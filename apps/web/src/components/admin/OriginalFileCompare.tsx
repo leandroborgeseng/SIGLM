@@ -25,12 +25,15 @@ export function OriginalFilePane({
   attachment,
   className,
   heightPx = DEFAULT_COMPARE_PANEL_HEIGHT,
+  onReplaceRequest,
 }: {
   actId: string;
   attachment: ActAttachment;
   className?: string;
   /** Altura total do quadro (px), incluindo cabeçalho interno. */
   heightPx?: number;
+  /** Sai do compare e leva o usuário a substituir o arquivo nos Metadados. */
+  onReplaceRequest?: () => void;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -130,6 +133,11 @@ export function OriginalFilePane({
               >
                 Abrir em nova aba
               </Button>
+              {onReplaceRequest && (
+                <Button size="sm" variant="tonal" onClick={onReplaceRequest}>
+                  Substituir arquivo
+                </Button>
+              )}
             </div>
           </div>
         )}

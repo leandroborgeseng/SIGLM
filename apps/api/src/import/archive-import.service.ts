@@ -547,6 +547,9 @@ export class ArchiveImportService {
     const ementa = item.ementa?.trim() || 'Ementa pendente — importação de acervo';
     const slug = buildActSlug(tipo, ano, numero);
 
+    // Cópia definitiva ANTES de criar o ato — evita cadastro órfão sem arquivo.
+    const permanent = await this.copyOriginalToPermanent(item);
+
     const act = await this.prisma.normativeAct.create({
       data: {
         tipo,
@@ -561,7 +564,7 @@ export class ArchiveImportService {
       },
     });
 
-    await this.attachOriginalToAct(act.id, item, userId);
+    await this.linkPermanentOriginal(act.id, item, permanent, userId);
 
     await this.prisma.archiveImportItem.update({
       where: { id: itemId },
@@ -590,22 +593,29 @@ export class ArchiveImportService {
     };
   }
 
-  private async attachOriginalToAct(
-    actId: string,
-    item: { arquivo: string; nomeArquivo: string; formato: ImportFormat },
-    userId: string,
-  ) {
+  private async copyOriginalToPermanent(item: {
+    id?: string;
+    arquivo: string;
+    nomeArquivo: string;
+  }) {
     const src = path.join(this.uploadDir, item.arquivo);
-    let permanent;
+    const storageKey = item.id ?? `acervo-${Date.now()}`;
     try {
-      permanent = await copyToPermanentAttachmentStorage(src, actId, item.nomeArquivo);
+      return await copyToPermanentAttachmentStorage(src, storageKey, item.nomeArquivo);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'falha ao copiar';
       throw new BadRequestException(
         `Não foi possível transferir o arquivo original para o armazenamento definitivo (${msg})`,
       );
     }
+  }
 
+  private async linkPermanentOriginal(
+    actId: string,
+    item: { nomeArquivo: string; formato: ImportFormat },
+    permanent: { url: string; nome: string; tamanho: number; hash: string },
+    userId: string,
+  ) {
     await this.prisma.attachment.updateMany({
       where: {
         actId,
@@ -637,5 +647,14 @@ export class ArchiveImportService {
       resumo: `Vinculou arquivo original (${item.nomeArquivo}) via Importação de acervo`,
       withSnapshot: false,
     });
+  }
+
+  private async attachOriginalToAct(
+    actId: string,
+    item: { id?: string; arquivo: string; nomeArquivo: string; formato: ImportFormat },
+    userId: string,
+  ) {
+    const permanent = await this.copyOriginalToPermanent(item);
+    await this.linkPermanentOriginal(actId, item, permanent, userId);
   }
 }

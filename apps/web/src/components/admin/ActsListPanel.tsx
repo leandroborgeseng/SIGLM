@@ -138,6 +138,95 @@ export function ActsListPanel({ initial }: { initial: AdminListResponse }) {
           <KpiCard label="Publicados no mês" value={data.kpis.publicadosMes} />
         </div>
 
+        {/* Filtros empilhados em telas menores (acompanham a listagem sem scroll horizontal). */}
+        <div className="mb-4 space-y-3 rounded-[14px] border border-line bg-surface p-4 shadow-sm md:hidden">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[13px] font-semibold text-ink">Filtros</p>
+            {hasFilters && (
+              <Button type="button" size="sm" variant="ghost" onClick={clearFilters}>
+                <X className="h-3.5 w-3.5" />
+                Limpar
+              </Button>
+            )}
+          </div>
+          <Input
+            value={draft.norma}
+            onChange={(e) => setDraft((d) => ({ ...d, norma: e.target.value }))}
+            placeholder="Filtrar norma…"
+            className="h-9 text-[12.5px]"
+            aria-label="Filtrar por norma"
+          />
+          <Input
+            value={draft.ementa}
+            onChange={(e) => setDraft((d) => ({ ...d, ementa: e.target.value }))}
+            placeholder="Filtrar ementa…"
+            className="h-9 text-[12.5px]"
+            aria-label="Filtrar por ementa"
+          />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Select
+              value={draft.situacao}
+              onChange={(e) => applySelectFilters({ situacao: e.target.value })}
+              className="h-9 text-[12.5px]"
+              aria-label="Filtrar por situação"
+            >
+              <option value="">Situação: todas</option>
+              {SITUACOES.map((s) => (
+                <option key={s} value={s}>
+                  {SITUACAO_LABELS[s]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={draft.statusPublicacao}
+              onChange={(e) => applySelectFilters({ statusPublicacao: e.target.value })}
+              className="h-9 text-[12.5px]"
+              aria-label="Filtrar por status"
+            >
+              {STATUS_OPTS.map((o) => (
+                <option key={o.value || 'all'} value={o.value}>
+                  Status: {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={draft.etapaEditorial}
+              onChange={(e) => applySelectFilters({ etapaEditorial: e.target.value })}
+              className="h-9 text-[12.5px]"
+              aria-label="Filtrar por estágio editorial"
+            >
+              <option value="">Estágio: todos</option>
+              {ETAPAS_EDITORIAIS.map((e) => (
+                <option key={e} value={e}>
+                  {ETAPA_EDITORIAL_LABELS[e]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="block text-[11px] text-ink-3">
+              Publicação — data inicial
+              <Input
+                type="date"
+                value={draft.publicadoDe}
+                onChange={(e) => applySelectFilters({ publicadoDe: e.target.value })}
+                className="mt-1 h-9 font-mono text-[11.5px]"
+                aria-label="Data inicial de publicação"
+              />
+            </label>
+            <label className="block text-[11px] text-ink-3">
+              Publicação — data final
+              <Input
+                type="date"
+                value={draft.publicadoAte}
+                onChange={(e) => applySelectFilters({ publicadoAte: e.target.value })}
+                className="mt-1 h-9 font-mono text-[11.5px]"
+                aria-label="Data final de publicação"
+              />
+            </label>
+          </div>
+        </div>
+
         <div className="overflow-x-auto rounded-[14px] border border-line bg-surface shadow-sm">
           <table className="w-full min-w-[1120px] text-left text-[13.5px]">
             <thead>
@@ -150,7 +239,7 @@ export function ActsListPanel({ initial }: { initial: AdminListResponse }) {
                 <th className="text-section whitespace-nowrap px-4 py-3">Publicação</th>
                 <th className="text-section whitespace-nowrap px-4 py-3">Ações</th>
               </tr>
-              <tr className="border-b border-line bg-surface">
+              <tr className="hidden border-b border-line bg-surface md:table-row">
                 <th className="px-3 py-2 align-top">
                   <Input
                     value={draft.norma}
