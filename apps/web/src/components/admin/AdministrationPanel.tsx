@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Upload } from 'lucide-react';
+import { Cloud, Download, Upload } from 'lucide-react';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 import { AdminTopbar } from '@/components/admin/AdminShell';
 import { Badge } from '@/components/ui/Badge';
@@ -15,6 +15,7 @@ import {
   createSignatory,
   createUser,
   downloadSystemBackup,
+  getS3BackupStatus,
   listOrgans,
   listPermissions,
   listPublicationMedia,
@@ -23,6 +24,8 @@ import {
   listUsers,
   repairOriginalAttachments,
   restoreSystemBackup,
+  runS3BackupNow,
+  saveS3BackupConfig,
   setRolePermissions,
   updateOrgan,
   updatePublicationMedium,
@@ -33,6 +36,7 @@ import {
   type AdminUser,
   type OriginOrg,
   type PublicationMedium,
+  type S3BackupStatus,
 } from '@/lib/admin-api';
 import { cn } from '@/lib/format';
 
@@ -139,11 +143,48 @@ export function AdministrationPanel() {
   );
 }
 
+type S3FormState = {
+  enabled: boolean;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  endpoint: string;
+  forcePathStyle: boolean;
+  prefix: string;
+  hour: number;
+  timezone: string;
+  keepDaily: number;
+  keepWeekly: number;
+  keepMonthly: number;
+};
+
+const defaultS3Form = (): S3FormState => ({
+  enabled: false,
+  bucket: '',
+  region: 'us-east-1',
+  accessKeyId: '',
+  secretAccessKey: '',
+  endpoint: '',
+  forcePathStyle: true,
+  prefix: 'siglm/backups',
+  hour: 3,
+  timezone: 'America/Sao_Paulo',
+  keepDaily: 7,
+  keepWeekly: 5,
+  keepMonthly: 12,
+});
+
 function BackupTab() {
   const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  const [s3Running, setS3Running] = useState(false);
+  const [s3Saving, setS3Saving] = useState(false);
+  const [s3Loading, setS3Loading] = useState(true);
+  const [s3Status, setS3Status] = useState<S3BackupStatus | null>(null);
+  const [s3Form, setS3Form] = useState<S3FormState>(defaultS3Form);
   const [confirmText, setConfirmText] = useState('');
 
   const [repairReport, setRepairReport] = useState<{
@@ -152,6 +193,93 @@ function BackupTab() {
     repaired: { actId: string; slug: string; newUrl: string }[];
     missing: { actId: string; slug: string; motivo: string }[];
   } | null>(null);
+
+  const applyS3Status = useCallback((status: S3BackupStatus) => {
+    setS3Status(status);
+    setS3Form({
+      enabled: status.enabled,
+      bucket: status.bucket || '',
+      region: status.region || 'us-east-1',
+      accessKeyId: status.accessKeyId || '',
+      secretAccessKey: '',
+      endpoint: status.endpoint || '',
+      forcePathStyle: status.forcePathStyle,
+      prefix: status.prefix || 'siglm/backups',
+      hour: status.hour ?? 3,
+      timezone: status.timezone || 'America/Sao_Paulo',
+      keepDaily: status.keepDaily,
+      keepWeekly: status.keepWeekly,
+      keepMonthly: status.keepMonthly,
+    });
+  }, []);
+
+  const refreshS3Status = useCallback(async () => {
+    try {
+      const status = await getS3BackupStatus();
+      applyS3Status(status);
+    } catch {
+      setS3Status(null);
+    } finally {
+      setS3Loading(false);
+    }
+  }, [applyS3Status]);
+
+  useEffect(() => {
+    void refreshS3Status();
+  }, [refreshS3Status]);
+
+  const onS3Save = async () => {
+    setS3Saving(true);
+    try {
+      const status = await saveS3BackupConfig({
+        enabled: s3Form.enabled,
+        bucket: s3Form.bucket.trim(),
+        region: s3Form.region.trim(),
+        accessKeyId: s3Form.accessKeyId.trim(),
+        ...(s3Form.secretAccessKey.trim()
+          ? { secretAccessKey: s3Form.secretAccessKey.trim() }
+          : {}),
+        endpoint: s3Form.endpoint.trim() || null,
+        forcePathStyle: s3Form.forcePathStyle,
+        prefix: s3Form.prefix.trim() || 'siglm/backups',
+        hour: s3Form.hour,
+        timezone: s3Form.timezone.trim() || 'America/Sao_Paulo',
+        keepDaily: s3Form.keepDaily,
+        keepWeekly: s3Form.keepWeekly,
+        keepMonthly: s3Form.keepMonthly,
+      });
+      applyS3Status(status);
+      toast('Configuração de backup S3 salva', 'ok');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erro ao salvar configuração S3', 'danger');
+    } finally {
+      setS3Saving(false);
+    }
+  };
+
+  const onS3Run = async () => {
+    setS3Running(true);
+    try {
+      const result = await runS3BackupNow();
+      await refreshS3Status();
+      const tiers = result.uploaded?.map((u) => u.tier).join(', ') || '—';
+      toast(
+        result.ok
+          ? `Backup S3 concluído (${tiers})`
+          : result.error || 'Backup S3 falhou',
+        result.ok ? 'ok' : 'danger',
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erro no backup S3', 'danger');
+      await refreshS3Status();
+    } finally {
+      setS3Running(false);
+    }
+  };
+
+  const setS3Field = <K extends keyof S3FormState>(key: K, value: S3FormState[K]) => {
+    setS3Form((prev) => ({ ...prev, [key]: value }));
+  };
 
   const onRepairOriginals = async () => {
     setRepairing(true);
@@ -304,6 +432,284 @@ function BackupTab() {
 
       <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
         <div className="flex items-start gap-3">
+          <Cloud className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[15px] font-semibold text-ink">Backup automático (S3)</h3>
+            <p className="mt-1 text-[13.5px] text-ink-3">
+              Configure aqui o repositório S3 (AWS, MinIO, Cloudflare R2…). O sistema envia o
+              backup todos os dias e mantém: diários, 1 por semana e 1 por mês — apagando os
+              mais antigos automaticamente. Não é necessário editar arquivo de configuração.
+            </p>
+
+            {s3Loading ? (
+              <p className="mt-4 text-[13px] text-ink-3">Carregando configuração…</p>
+            ) : !s3Status ? (
+              <p className="mt-4 text-[13px] text-danger">
+                Não foi possível carregar a configuração S3.
+              </p>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-flex items-center gap-2 text-[13.5px] text-ink">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-line"
+                      checked={s3Form.enabled}
+                      onChange={(e) => setS3Field('enabled', e.target.checked)}
+                      disabled={s3Saving || s3Running}
+                    />
+                    Ativar backup diário automático
+                  </label>
+                  <Badge
+                    variant={
+                      s3Status.enabled && s3Status.configured ? 'ok' : 'warn'
+                    }
+                  >
+                    {!s3Status.enabled
+                      ? 'Desabilitado'
+                      : !s3Status.configured
+                        ? 'Incompleto'
+                        : s3Status.running
+                          ? 'Em execução'
+                          : 'Ativo'}
+                  </Badge>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-[12px] font-medium text-ink-2">
+                    Nome do bucket
+                    <Input
+                      className="mt-1"
+                      value={s3Form.bucket}
+                      onChange={(e) => setS3Field('bucket', e.target.value)}
+                      placeholder="meu-bucket-siglm"
+                      disabled={s3Saving || s3Running}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="block text-[12px] font-medium text-ink-2">
+                    Região
+                    <Input
+                      className="mt-1"
+                      value={s3Form.region}
+                      onChange={(e) => setS3Field('region', e.target.value)}
+                      placeholder="us-east-1"
+                      disabled={s3Saving || s3Running}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="block text-[12px] font-medium text-ink-2">
+                    Access Key ID
+                    <Input
+                      className="mt-1 font-mono"
+                      value={s3Form.accessKeyId}
+                      onChange={(e) => setS3Field('accessKeyId', e.target.value)}
+                      placeholder="AKIA…"
+                      disabled={s3Saving || s3Running}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="block text-[12px] font-medium text-ink-2">
+                    Secret Access Key
+                    <Input
+                      className="mt-1 font-mono"
+                      type="password"
+                      value={s3Form.secretAccessKey}
+                      onChange={(e) => setS3Field('secretAccessKey', e.target.value)}
+                      placeholder={
+                        s3Status.hasSecret
+                          ? '•••••••• (deixe em branco para manter)'
+                          : 'Cole a chave secreta'
+                      }
+                      disabled={s3Saving || s3Running}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  <label className="block text-[12px] font-medium text-ink-2">
+                    Pasta no bucket (prefixo)
+                    <Input
+                      className="mt-1 font-mono"
+                      value={s3Form.prefix}
+                      onChange={(e) => setS3Field('prefix', e.target.value)}
+                      placeholder="siglm/backups"
+                      disabled={s3Saving || s3Running}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="block text-[12px] font-medium text-ink-2">
+                    Horário do backup diário
+                    <Select
+                      className="mt-1"
+                      value={String(s3Form.hour)}
+                      onChange={(e) => setS3Field('hour', Number(e.target.value))}
+                      disabled={s3Saving || s3Running}
+                    >
+                      {Array.from({ length: 24 }, (_, h) => (
+                        <option key={h} value={h}>
+                          {String(h).padStart(2, '0')}:00
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                </div>
+
+                <div className="rounded-[10px] border border-line bg-surface-2 px-3 py-3">
+                  <p className="text-[13px] font-semibold text-ink">Retenção de backups</p>
+                  <p className="mt-1 text-[12.5px] text-ink-3">
+                    Quantos arquivos manter no S3. Os mais antigos de cada tipo são apagados
+                    automaticamente.
+                  </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <label className="block text-[12px] font-medium text-ink-2">
+                      Cópias diárias
+                      <Input
+                        className="mt-1"
+                        type="number"
+                        min={1}
+                        max={90}
+                        value={s3Form.keepDaily}
+                        onChange={(e) =>
+                          setS3Field('keepDaily', Number(e.target.value) || 7)
+                        }
+                        disabled={s3Saving || s3Running}
+                      />
+                      <span className="mt-1 block text-[11.5px] font-normal text-ink-4">
+                        Ex.: 7 = uma por dia na última semana
+                      </span>
+                    </label>
+                    <label className="block text-[12px] font-medium text-ink-2">
+                      Cópias semanais
+                      <Input
+                        className="mt-1"
+                        type="number"
+                        min={1}
+                        max={52}
+                        value={s3Form.keepWeekly}
+                        onChange={(e) =>
+                          setS3Field('keepWeekly', Number(e.target.value) || 5)
+                        }
+                        disabled={s3Saving || s3Running}
+                      />
+                      <span className="mt-1 block text-[11.5px] font-normal text-ink-4">
+                        Geradas todo domingo
+                      </span>
+                    </label>
+                    <label className="block text-[12px] font-medium text-ink-2">
+                      Cópias mensais
+                      <Input
+                        className="mt-1"
+                        type="number"
+                        min={1}
+                        max={120}
+                        value={s3Form.keepMonthly}
+                        onChange={(e) =>
+                          setS3Field('keepMonthly', Number(e.target.value) || 12)
+                        }
+                        disabled={s3Saving || s3Running}
+                      />
+                      <span className="mt-1 block text-[11.5px] font-normal text-ink-4">
+                        Geradas no dia 1 de cada mês
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <details className="rounded-[10px] border border-line bg-surface-2 px-3 py-2">
+                  <summary className="cursor-pointer text-[13px] font-medium text-ink-2">
+                    Opções avançadas (endpoint, fuso)
+                  </summary>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <label className="block text-[12px] font-medium text-ink-2 sm:col-span-2">
+                      Endpoint (MinIO / R2 — opcional)
+                      <Input
+                        className="mt-1 font-mono"
+                        value={s3Form.endpoint}
+                        onChange={(e) => setS3Field('endpoint', e.target.value)}
+                        placeholder="https://….r2.cloudflarestorage.com"
+                        disabled={s3Saving || s3Running}
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label className="block text-[12px] font-medium text-ink-2">
+                      Fuso horário
+                      <Input
+                        className="mt-1 font-mono"
+                        value={s3Form.timezone}
+                        onChange={(e) => setS3Field('timezone', e.target.value)}
+                        placeholder="America/Sao_Paulo"
+                        disabled={s3Saving || s3Running}
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-[13px] text-ink-2 sm:col-span-3">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-line"
+                        checked={s3Form.forcePathStyle}
+                        onChange={(e) => setS3Field('forcePathStyle', e.target.checked)}
+                        disabled={s3Saving || s3Running}
+                      />
+                      Path-style (recomendado para MinIO / alguns endpoints compatíveis)
+                    </label>
+                  </div>
+                </details>
+
+                <div className="rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-[12px] text-ink-3">
+                  {s3Status.lastRun ? (
+                    <p>
+                      Última execução:{' '}
+                      {new Date(s3Status.lastRun.at).toLocaleString('pt-BR')} ·{' '}
+                      {s3Status.lastRun.ok ? 'sucesso' : 'erro'} (
+                      {s3Status.lastRun.triggeredBy})
+                      {s3Status.lastRun.error
+                        ? ` — ${s3Status.lastRun.error}`
+                        : ''}
+                    </p>
+                  ) : (
+                    <p>Ainda não houve execução neste servidor após o último restart.</p>
+                  )}
+                  <p className="mt-1">
+                    Agendamento: todos os dias às{' '}
+                    {String(s3Form.hour).padStart(2, '0')}:00 ({s3Form.timezone}). No
+                    domingo também grava semanal; no dia 1, mensal.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => void onS3Save()}
+                    disabled={s3Saving || s3Running || exporting || restoring}
+                  >
+                    {s3Saving ? 'Salvando…' : 'Salvar configuração'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outlined"
+                    onClick={() => void onS3Run()}
+                    disabled={
+                      s3Running ||
+                      s3Saving ||
+                      exporting ||
+                      restoring ||
+                      !s3Status.enabled ||
+                      !s3Status.configured ||
+                      s3Status.running
+                    }
+                  >
+                    {s3Running || s3Status.running
+                      ? 'Enviando backup…'
+                      : 'Executar backup agora'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
+        <div className="flex items-start gap-3">
           <Download className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
           <div className="min-w-0 flex-1">
             <h3 className="text-[15px] font-semibold text-ink">Exportar backup</h3>
@@ -315,7 +721,7 @@ function BackupTab() {
               className="mt-4"
               size="sm"
               onClick={() => void onExport()}
-              disabled={exporting || restoring}
+              disabled={exporting || restoring || s3Running}
             >
               {exporting ? 'Gerando backup…' : 'Baixar backup completo'}
             </Button>
@@ -353,7 +759,10 @@ function BackupTab() {
                 size="sm"
                 variant="danger"
                 disabled={
-                  restoring || exporting || confirmText.trim().toUpperCase() !== 'RESTAURAR'
+                  restoring ||
+                  exporting ||
+                  s3Running ||
+                  confirmText.trim().toUpperCase() !== 'RESTAURAR'
                 }
                 onClick={() => {
                   const input = document.getElementById(

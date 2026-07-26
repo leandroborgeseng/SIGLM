@@ -1,7 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
   Post,
+  Put,
   Res,
   UploadedFile,
   UseGuards,
@@ -15,12 +17,17 @@ import type { AuthUser } from '../auth/auth.constants';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { UpdateS3BackupConfigDto } from './s3-backup.dto';
+import { S3BackupService } from './s3-backup.service';
 import { SystemBackupService } from './system-backup.service';
 
 @Controller('admin/system')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class SystemBackupController {
-  constructor(private readonly backup: SystemBackupService) {}
+  constructor(
+    private readonly backup: SystemBackupService,
+    private readonly s3Backup: S3BackupService,
+  ) {}
 
   /** Exporta banco + uploads (.tar.gz). Apenas admin_geral. */
   @Get('backup')
@@ -43,6 +50,28 @@ export class SystemBackupController {
       }
     });
     stream.pipe(res);
+  }
+
+  /** Configuração + status do backup S3 (sem revelar o secret). */
+  @Get('backup/s3')
+  @RequirePermissions('users:manage')
+  s3Status(@CurrentUser() user: AuthUser) {
+    this.backup.assertSystemAdmin(user);
+    return this.s3Backup.getPublicConfig();
+  }
+
+  /** Salva configuração S3 pela interface. */
+  @Put('backup/s3')
+  @RequirePermissions('users:manage')
+  saveS3Config(@CurrentUser() user: AuthUser, @Body() dto: UpdateS3BackupConfigDto) {
+    return this.s3Backup.updateConfig(user, dto);
+  }
+
+  /** Executa backup S3 agora (mesma retenção do agendamento). */
+  @Post('backup/s3/run')
+  @RequirePermissions('users:manage')
+  runS3Backup(@CurrentUser() user: AuthUser) {
+    return this.s3Backup.runNow(user);
   }
 
   /** Restaura backup completo (substitui dados atuais). Apenas admin_geral. */

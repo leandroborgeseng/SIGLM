@@ -54,6 +54,8 @@ type BackupPayload = {
   archiveImportBatches: unknown[];
   archiveImportItems: unknown[];
   auditLogs: unknown[];
+  /** Singleton opcional (backups antigos podem não ter). */
+  s3BackupConfig?: unknown[];
 };
 
 @Injectable()
@@ -74,12 +76,23 @@ export class SystemBackupService {
     }
   }
 
-  async createBackupArchive(user: AuthUser): Promise<{
+  /**
+   * Gera arquivo .tar.gz (banco JSON + uploads).
+   * Passe AuthUser (admin) para download manual, ou 'system' para cron/S3.
+   */
+  async createBackupArchive(actor: AuthUser | 'system'): Promise<{
     filePath: string;
     filename: string;
     cleanup: () => Promise<void>;
   }> {
-    this.assertSystemAdmin(user);
+    const isSystem = actor === 'system';
+    if (!isSystem) {
+      this.assertSystemAdmin(actor);
+    }
+
+    const createdBy = isSystem
+      ? { id: 'system', email: 'system@siglm.local', nome: 'Backup automático S3' }
+      : { id: actor.id, email: actor.email, nome: actor.nome };
 
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const staging = await fs.mkdtemp(path.join(os.tmpdir(), 'siglm-backup-'));
@@ -94,7 +107,7 @@ export class SystemBackupService {
       const manifest: BackupManifest = {
         format: BACKUP_FORMAT,
         createdAt: new Date().toISOString(),
-        createdBy: { id: user.id, email: user.email, nome: user.nome },
+        createdBy,
         app: 'SIGLM',
         counts,
         includesUploads: true,
@@ -124,11 +137,11 @@ export class SystemBackupService {
 
       await this.prisma.auditLog.create({
         data: {
-          userId: user.id,
-          acao: 'system.backup.export',
+          userId: isSystem ? null : actor.id,
+          acao: isSystem ? 'system.backup.s3' : 'system.backup.export',
           entidade: 'SystemBackup',
           entidadeId: stamp,
-          diff: { counts, filename: path.basename(archivePath) },
+          diff: { counts, filename: path.basename(archivePath), automatic: isSystem },
         },
       });
 
@@ -248,6 +261,7 @@ export class SystemBackupService {
       archiveImportBatches,
       archiveImportItems,
       auditLogs,
+      s3BackupConfig,
     ] = await Promise.all([
       this.prisma.permission.findMany(),
       this.prisma.role.findMany(),
@@ -299,6 +313,7 @@ export class SystemBackupService {
       this.prisma.archiveImportBatch.findMany(),
       this.prisma.archiveImportItem.findMany(),
       this.prisma.auditLog.findMany(),
+      this.prisma.s3BackupConfig.findMany(),
     ]);
 
     return {
@@ -324,6 +339,7 @@ export class SystemBackupService {
       archiveImportBatches,
       archiveImportItems,
       auditLogs,
+      s3BackupConfig,
     };
   }
 
@@ -354,7 +370,8 @@ export class SystemBackupService {
             "role_permissions",
             "users",
             "roles",
-            "permissions"
+            "permissions",
+            "s3_backup_config"
           RESTART IDENTITY CASCADE
         `);
 
@@ -456,6 +473,11 @@ export class SystemBackupService {
         if (data.auditLogs?.length) {
           await tx.auditLog.createMany({
             data: data.auditLogs as Prisma.AuditLogCreateManyInput[],
+          });
+        }
+        if (data.s3BackupConfig?.length) {
+          await tx.s3BackupConfig.createMany({
+            data: data.s3BackupConfig as Prisma.S3BackupConfigCreateManyInput[],
           });
         }
       },

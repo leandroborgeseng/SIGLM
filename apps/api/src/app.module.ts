@@ -1,6 +1,7 @@
 import { AdministrationModule } from './administration/administration.module';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { AuditInterceptor } from './audit/audit.interceptor';
@@ -14,6 +15,7 @@ import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuditModule,
     AuthModule,

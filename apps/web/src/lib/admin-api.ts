@@ -909,4 +909,70 @@ export async function restoreSystemBackup(file: File) {
   }>;
 }
 
+export type S3BackupStatus = {
+  enabled: boolean;
+  configured: boolean;
+  hasSecret: boolean;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  endpoint: string | null;
+  forcePathStyle: boolean;
+  prefix: string;
+  hour: number;
+  timezone: string;
+  cron: string;
+  keepDaily: number;
+  keepWeekly: number;
+  keepMonthly: number;
+  running: boolean;
+  lastRun: {
+    at: string;
+    ok: boolean;
+    error?: string;
+    uploaded?: { tier: 'daily' | 'weekly' | 'monthly'; key: string }[];
+    pruned?: { tier: 'daily' | 'weekly' | 'monthly'; deleted: number }[];
+    triggeredBy: 'cron' | 'manual';
+  } | null;
+};
+
+export type S3BackupConfigInput = {
+  enabled: boolean;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey?: string;
+  endpoint?: string | null;
+  forcePathStyle?: boolean;
+  prefix: string;
+  hour: number;
+  timezone: string;
+  keepDaily: number;
+  keepWeekly: number;
+  keepMonthly: number;
+};
+
+/** Configuração + status do backup S3 (sem revelar o secret). */
+export function getS3BackupStatus(token?: string) {
+  return adminFetch<S3BackupStatus>('/admin/system/backup/s3', undefined, token);
+}
+
+/** Salva configuração S3 pela interface. */
+export function saveS3BackupConfig(input: S3BackupConfigInput, token?: string) {
+  return adminFetch<S3BackupStatus>(
+    '/admin/system/backup/s3',
+    { method: 'PUT', body: JSON.stringify(input) },
+    token,
+  );
+}
+
+/** Dispara backup S3 agora. */
+export function runS3BackupNow(token?: string) {
+  return adminFetch<NonNullable<S3BackupStatus['lastRun']>>(
+    '/admin/system/backup/s3/run',
+    { method: 'POST' },
+    token,
+  );
+}
+
 export type { AdminListResponse };
