@@ -350,8 +350,11 @@ export class NormativeActsService {
         where: { actId: act.id, isCurrent: true },
       });
       const snap = currentRev?.snapshot as ActSnapshot | null;
-      if (snap?.units?.length) {
-        publicUnits = snap.units.map((u) => ({
+      // Com versão de trabalho aberta, a consulta pública deve refletir SEMPRE o snapshot
+      // publicado — inclusive atos “Somente arquivo original” (units vazias). Caso contrário
+      // metadados/WIP estruturado vazam no portal antes da republicação.
+      if (snap) {
+        publicUnits = (snap.units ?? []).map((u) => ({
           id: u.id,
           actId: act.id,
           tipoUnidade: u.tipoUnidade as UnitType,
@@ -378,7 +381,16 @@ export class NormativeActsService {
         publicDataPublicacao = snap.metadata.dataPublicacao
           ? new Date(snap.metadata.dataPublicacao)
           : publicDataPublicacao;
-        if (snap.metadata.signatories) {
+        if (snap.metadata.meioPublicacao || snap.metadata.meioPublicacaoId) {
+          publicMeio = {
+            id: snap.metadata.meioPublicacaoId ?? act.meioPublicacaoId ?? '',
+            nome: snap.metadata.meioPublicacao ?? act.meioPublicacao?.nome ?? '',
+            ativo: true,
+            createdAt: act.createdAt,
+            updatedAt: act.updatedAt,
+          } as NonNullable<typeof act.meioPublicacao>;
+        }
+        if (Array.isArray(snap.metadata.signatories)) {
           publicSignatarios = snap.metadata.signatories.map((s, i) => ({
             id: `snap-sig-${i}`,
             actId: act.id,
@@ -389,23 +401,44 @@ export class NormativeActsService {
             createdAt: act.createdAt,
           })) as typeof act.signatories;
         }
-      }
-      if (snap?.attachments?.length) {
-        publicAttachments = snap.attachments.map((a) => ({
-          id: a.id,
-          actId: act.id,
-          tipo: a.tipo as (typeof act.attachments)[number]['tipo'],
-          url: a.url,
-          nome: a.nome,
-          titulo: a.titulo,
-          href: a.href,
-          ordem: a.ordem,
-          ativo: a.ativo,
-          tamanho: null,
-          hash: null,
-          criadoEm: act.createdAt,
-          substituidoEm: null,
-        })) as typeof act.attachments;
+        if (snap.metadata.orgaoOrigemIds?.length) {
+          const orgs = await this.prisma.originOrg.findMany({
+            where: { id: { in: snap.metadata.orgaoOrigemIds } },
+          });
+          const byId = new Map(orgs.map((o) => [o.id, o]));
+          publicOrgaos = snap.metadata.orgaoOrigemIds
+            .map((orgaoId, ordem) => {
+              const orgao = byId.get(orgaoId);
+              if (!orgao) return null;
+              return {
+                actId: act.id,
+                orgaoId,
+                ordem,
+                orgao,
+              };
+            })
+            .filter((l): l is NonNullable<typeof l> => Boolean(l)) as typeof act.originOrgs;
+        } else {
+          // Snapshot sem IDs: evita vazar órgãos da versão de trabalho.
+          publicOrgaos = [];
+        }
+        if (Array.isArray(snap.attachments)) {
+          publicAttachments = snap.attachments.map((a) => ({
+            id: a.id,
+            actId: act.id,
+            tipo: a.tipo as (typeof act.attachments)[number]['tipo'],
+            url: a.url,
+            nome: a.nome,
+            titulo: a.titulo,
+            href: a.href,
+            ordem: a.ordem,
+            ativo: a.ativo,
+            tamanho: null,
+            hash: null,
+            criadoEm: act.createdAt,
+            substituidoEm: null,
+          })) as typeof act.attachments;
+        }
       }
     }
 
