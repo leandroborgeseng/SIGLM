@@ -3,12 +3,14 @@ import { AdminAuthProvider } from '@/components/admin/AdminAuthContext';
 import { AdminDirtyProvider } from '@/components/admin/AdminDirtyContext';
 import { AdminMenuProvider } from '@/components/admin/AdminMenuContext';
 import { AdminSidebar } from '@/components/admin/AdminShell';
+import { ToastProvider } from '@/components/ui/Toast';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <AdminAuthProvider>
       <AdminDirtyProvider>
       <AdminMenuProvider>
+      <ToastProvider>
       <SkipLink />
       <div className="flex h-dvh max-h-dvh overflow-hidden bg-canvas">
         <AdminSidebar />
@@ -19,6 +21,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           {children}
         </main>
       </div>
+      </ToastProvider>
     </AdminMenuProvider>
       </AdminDirtyProvider>
     </AdminAuthProvider>
