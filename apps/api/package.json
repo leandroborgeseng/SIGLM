@@ -37,6 +37,7 @@
     "pdfkit": "^0.19.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "prisma": "^6.5.0",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
@@ -48,7 +49,6 @@
     "@types/passport-jwt": "^4.0.1",
     "@types/pdf-parse": "^1.1.5",
     "@types/pdfkit": "^0.17.6",
-    "prisma": "^6.5.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2"
   },

@@ -117,7 +117,7 @@ Push na `main` dispara rebuild automático (Auto Deploy). Após seed OK nos logs
 | **Publicar código** | `git push origin main` → Coolify deploya sozinho |
 | **Redeploy manual** | Botão **Redeploy** no Coolify |
 | **Ver logs** | Coolify → serviço **api** ou **web** → Logs |
-| **Migrations** | Automáticas no deploy (`prestart`) |
+| **Migrations** | Automáticas no start do container (`docker-entrypoint.sh` → `prisma migrate deploy`) |
 | **Backup banco** | Volume `pgdata` — veja [`BACKUP.md`](BACKUP.md) (Restic) |
 | **Uploads PDF** | Volume `api_uploads` — incluído no backup Restic |
 

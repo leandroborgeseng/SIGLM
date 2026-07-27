@@ -19,8 +19,38 @@ case "$POSTGRES_PASSWORD" in
     ;;
 esac
 
-echo "Aplicando migrations..."
-npx prisma migrate deploy
+# Prisma CLI: workspace root ou PATH (produção precisa de `prisma` em dependencies).
+PRISMA_BIN=""
+for candidate in \
+  ../../node_modules/.bin/prisma \
+  ./node_modules/.bin/prisma \
+  /app/node_modules/.bin/prisma
+do
+  if [ -x "$candidate" ]; then
+    PRISMA_BIN="$candidate"
+    break
+  fi
+done
+if [ -z "$PRISMA_BIN" ]; then
+  PRISMA_BIN="$(command -v prisma 2>/dev/null || true)"
+fi
+if [ -z "$PRISMA_BIN" ] || [ ! -x "$PRISMA_BIN" ]; then
+  echo "ERRO: CLI prisma não encontrado na imagem. Verifique apps/api/Dockerfile e dependencies."
+  exit 1
+fi
+
+echo "Aplicando migrations (prisma migrate deploy)..."
+i=0
+until "$PRISMA_BIN" migrate deploy; do
+  i=$((i + 1))
+  if [ "$i" -ge 30 ]; then
+    echo "ERRO: prisma migrate deploy falhou após 30 tentativas."
+    exit 1
+  fi
+  echo "Banco ainda não pronto ou migrate falhou; nova tentativa em 2s ($i/30)..."
+  sleep 2
+done
+echo "Migrations aplicadas."
 
 if [ "$RUN_SEED" = "true" ]; then
   echo "Executando seed..."
@@ -55,4 +85,4 @@ p.user.count()
 fi
 
 echo "Iniciando API..."
-exec npm start
+exec node dist/src/main
