@@ -121,9 +121,18 @@ export default async function LegislacaoPage({
   let apiError: string | null = null;
 
   try {
-    [counts, orgaos] = await Promise.all([getFilterCounts(), getPublicOriginOrgs()]);
+    counts = await getFilterCounts();
   } catch (err) {
     apiError = err instanceof Error ? err.message : 'Erro ao conectar à API';
+  }
+
+  // Órgãos é endpoint novo — não derruba o portal se a API ainda não tiver sido redeployada.
+  if (!apiError) {
+    try {
+      orgaos = await getPublicOriginOrgs();
+    } catch {
+      orgaos = [];
+    }
   }
 
   if (apiError || !counts) {
