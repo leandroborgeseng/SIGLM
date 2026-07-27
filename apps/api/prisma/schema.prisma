@@ -10,22 +10,29 @@ datasource db {
 // ─── Auth / RBAC ───────────────────────────────────────────────────────────
 
 model User {
-  id        String   @id @default(uuid())
-  nome      String
-  email     String   @unique
-  hashSenha String   @map("hash_senha")
-  roleId    String   @map("role_id")
-  ativo     Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                 String   @id @default(uuid())
+  nome               String
+  email              String   @unique
+  hashSenha          String   @map("hash_senha")
+  roleId             String   @map("role_id")
+  ativo              Boolean  @default(true)
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  sessionVersion     Int      @default(0) @map("session_version")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   role              Role              @relation(fields: [roleId], references: [id])
+  roleLinks         UserRole[]
+  orgLinks          UserOriginOrg[]
+  extraPermissions  UserPermission[]
   normativeChanges  NormativeChange[]
   imports           Import[]
   archiveImportBatches ArchiveImportBatch[]
   ocrReviews        OcrResult[]       @relation("OcrReviewer")
   auditLogs         AuditLog[]
   actInternalHistory ActInternalHistory[]
+  actsAsResponsavelEstruturacao NormativeAct[] @relation("ActResponsavelEstruturacao")
+  actsAsResponsavelRevisao      NormativeAct[] @relation("ActResponsavelRevisao")
 
   @@map("users")
 }
@@ -35,15 +42,41 @@ model Role {
   nome        String           @unique
   descricao   String?
   users       User[]
+  userLinks   UserRole[]
   permissions RolePermission[]
 
   @@map("roles")
+}
+
+model UserRole {
+  userId    String  @map("user_id")
+  roleId    String  @map("role_id")
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model UserOriginOrg {
+  userId    String  @map("user_id")
+  orgaoId   String  @map("orgao_id")
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgao OriginOrg @relation(fields: [orgaoId], references: [id], onDelete: Cascade)
+
+  @@id([userId, orgaoId])
+  @@map("user_origin_orgs")
 }
 
 model Permission {
   id    String           @id @default(uuid())
   chave String           @unique
   roles RolePermission[]
+  users UserPermission[]
 
   @@map("permissions")
 }
@@ -59,6 +92,17 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+model UserPermission {
+  userId       String @map("user_id")
+  permissionId String @map("permission_id")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@map("user_permissions")
+}
+
 model OriginOrg {
   id        String   @id @default(uuid())
   nome      String   @unique
@@ -69,6 +113,7 @@ model OriginOrg {
 
   acts        NormativeAct[]
   actLinks    ActOriginOrg[]
+  userLinks   UserOriginOrg[]
   signatories Signatory[]
 
   @@map("origin_orgs")
@@ -166,6 +211,13 @@ enum EditorialStage {
   estruturado
 }
 
+/** Origem do texto integral identificado na importação de acervo. */
+enum IdentifiedTextOrigin {
+  pdf_text
+  docx
+  ocr
+}
+
 model NormativeAct {
   id                  String            @id @default(uuid())
   tipo                ActType
@@ -186,14 +238,20 @@ model NormativeAct {
   atoConjunto         Boolean           @default(false) @map("ato_conjunto")
   slug                String            @unique
   observacoesInternas String?           @map("observacoes_internas") @db.Text
+  textoIdentificadoImportacao String?   @map("texto_identificado_importacao") @db.Text
+  textoIdentificadoOrigem     IdentifiedTextOrigin? @map("texto_identificado_origem")
   statusPublicacao    PublicationStatus @default(rascunho) @map("status_publicacao")
   etapaEditorial      EditorialStage    @default(em_estruturacao) @map("etapa_editorial")
   editionOpen         Boolean           @default(false) @map("edition_open")
+  responsavelEstruturacaoId String?     @map("responsavel_estruturacao_id")
+  responsavelRevisaoId      String?     @map("responsavel_revisao_id")
   searchVector        Unsupported("tsvector")? @map("search_vector")
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
 
   orgao              OriginOrg?        @relation(fields: [orgaoOrigemId], references: [id], onDelete: SetNull)
+  responsavelEstruturacao User?        @relation("ActResponsavelEstruturacao", fields: [responsavelEstruturacaoId], references: [id], onDelete: SetNull)
+  responsavelRevisao      User?        @relation("ActResponsavelRevisao", fields: [responsavelRevisaoId], references: [id], onDelete: SetNull)
   meioPublicacao     PublicationMedium? @relation(fields: [meioPublicacaoId], references: [id], onDelete: SetNull)
   originOrgs         ActOriginOrg[]
   signatories        ActSignatory[]
@@ -218,6 +276,8 @@ model NormativeAct {
   @@index([etapaEditorial])
   @@index([orgaoOrigemId])
   @@index([meioPublicacaoId])
+  @@index([responsavelEstruturacaoId])
+  @@index([responsavelRevisaoId])
   @@map("normative_acts")
 }
 
@@ -306,11 +366,12 @@ model NormativeUnit {
   origemAct      NormativeAct?     @relation("UnitOrigemAct", fields: [origemActId], references: [id])
   alteradoPorAct NormativeAct?     @relation("UnitAlteradoPorAct", fields: [alteradoPorActId], references: [id])
   versions       NormativeVersion[]
-  changes        NormativeChange[]
+  changes        NormativeChange[] @relation("ChangeTargetUnit")
   legislativeEffectsSource LegislativeEffect[] @relation("EffectSource")
   legislativeEffectsTarget LegislativeEffect[] @relation("EffectTarget")
   legislativeEffectsReferencia LegislativeEffect[] @relation("EffectReferencia")
   legislativeEffectsRedacao LegislativeEffect[] @relation("EffectRedacao")
+  changesAsSource NormativeChange[] @relation("ChangeSourceUnit")
 
   @@index([actId, ordem])
   @@index([parentUnitId])
@@ -341,6 +402,11 @@ enum ChangeType {
   renumeracao
 }
 
+enum ChangeOrigin {
+  interna
+  externa
+}
+
 enum EffectType {
   alteracao_redacao
   inclusao
@@ -355,27 +421,56 @@ enum InclusaoPosicionamento {
   dentro_de
 }
 
-model NormativeChange {
-  id                    String     @id @default(uuid())
-  normaAlteradoraActId  String     @map("norma_alteradora_act_id")
-  normaAlteradaActId    String     @map("norma_alterada_act_id")
-  unitId                String?    @map("unit_id")
-  tipoAlteracao         ChangeType @map("tipo_alteracao")
-  textoAnterior         String?    @map("texto_anterior") @db.Text
-  textoNovo             String?    @map("texto_novo") @db.Text
-  notaGerada            String?    @map("nota_gerada")
-  fundamento            String?
-  data                  DateTime   @db.Date
-  autorId               String?    @map("autor_id")
-  createdAt             DateTime   @default(now()) @map("created_at")
+model ExternalLegislativeSource {
+  id          String    @id @default(uuid())
+  tipo        ActType?
+  numero      String?
+  ano         Int?
+  emissor     String
+  data        DateTime? @db.Date
+  descricao   String    @db.Text
+  url         String?
+  arquivoUrl  String?   @map("arquivo_url")
+  processo    String?
+  tribunal    String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  normaAlteradora NormativeAct  @relation("NormaAlteradora", fields: [normaAlteradoraActId], references: [id])
-  normaAlterada   NormativeAct  @relation("NormaAlterada", fields: [normaAlteradaActId], references: [id])
-  unit            NormativeUnit? @relation(fields: [unitId], references: [id])
-  autor           User?         @relation(fields: [autorId], references: [id])
+  changes NormativeChange[]
+
+  @@map("external_legislative_sources")
+}
+
+model NormativeChange {
+  id                    String       @id @default(uuid())
+  normaAlteradoraActId  String?      @map("norma_alteradora_act_id")
+  normaAlteradaActId    String       @map("norma_alterada_act_id")
+  sourceUnitId          String?      @map("source_unit_id")
+  unitId                String?      @map("unit_id")
+  tipoAlteracao         ChangeType   @map("tipo_alteracao")
+  origem                ChangeOrigin @default(interna)
+  externalSourceId      String?      @map("external_source_id")
+  incomplete            Boolean      @default(false)
+  textoAnterior         String?      @map("texto_anterior") @db.Text
+  textoNovo             String?      @map("texto_novo") @db.Text
+  notaGerada            String?      @map("nota_gerada")
+  fundamento            String?
+  data                  DateTime     @db.Date
+  autorId               String?      @map("autor_id")
+  createdAt             DateTime     @default(now()) @map("created_at")
+
+  normaAlteradora NormativeAct?              @relation("NormaAlteradora", fields: [normaAlteradoraActId], references: [id])
+  normaAlterada   NormativeAct               @relation("NormaAlterada", fields: [normaAlteradaActId], references: [id])
+  sourceUnit      NormativeUnit?             @relation("ChangeSourceUnit", fields: [sourceUnitId], references: [id])
+  unit            NormativeUnit?             @relation("ChangeTargetUnit", fields: [unitId], references: [id])
+  externalSource  ExternalLegislativeSource? @relation(fields: [externalSourceId], references: [id])
+  autor           User?                      @relation(fields: [autorId], references: [id])
 
   @@index([normaAlteradaActId])
   @@index([normaAlteradoraActId])
+  @@index([sourceUnitId])
+  @@index([origem])
+  @@index([incomplete])
   @@map("normative_changes")
 }
 
@@ -521,6 +616,9 @@ model ArchiveImportItem {
   ano           Int?
   dataAto       DateTime?               @map("data_ato") @db.Date
   ementa        String?                 @db.Text
+  textoIdentificadoImportacao String?   @map("texto_identificado_importacao") @db.Text
+  textoIdentificadoOrigem     IdentifiedTextOrigin? @map("texto_identificado_origem")
+  textoIdentificadoAusente    Boolean                 @default(false) @map("texto_identificado_ausente")
   confianca     Int                     @default(0)
   erroMensagem  String?                 @map("erro_mensagem")
   existingActId String?                 @map("existing_act_id")

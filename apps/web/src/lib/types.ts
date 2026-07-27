@@ -88,6 +88,16 @@ export interface NormativeVersion {
   validoAte: string | null;
 }
 
+export interface UnitNoteLink {
+  href: string;
+  externo?: boolean;
+}
+
+export interface UnitOutboundEffect {
+  label: string;
+  href: string;
+}
+
 export interface NormativeUnit {
   id: string;
   tipoUnidade: UnitType;
@@ -104,6 +114,8 @@ export interface NormativeUnit {
   status: UnitStatus;
   parentUnitId?: string | null;
   nota: string | null;
+  notaLink?: UnitNoteLink | null;
+  alteracoesSaida?: UnitOutboundEffect[];
   versoes: NormativeVersion[];
   efeitosLegislativos?: LegislativeEffect[];
 }
@@ -112,10 +124,14 @@ export interface ActHistoryItem {
   id: string;
   data: string;
   tipoAlteracao: string;
+  origem?: 'interna' | 'externa';
+  incomplete?: boolean;
   nota: string | null;
   fundamento: string | null;
   dispositivo: string | null;
+  sourceUnit?: { id: string; identificacao: string | null } | null;
   normaAlteradora: { codigo: string; slug: string } | null;
+  externalSource?: { descricao: string; emissor: string; url?: string | null } | null;
 }
 
 export interface ActAttachment {
@@ -155,6 +171,21 @@ export interface PublicationMediumRef {
   ativo?: boolean;
 }
 
+export interface ActUserRef {
+  id: string;
+  nome: string;
+  email: string;
+  ativo: boolean;
+}
+
+export interface ActAccessHints {
+  canEditStructure: boolean;
+  canReview: boolean;
+  canPublish: boolean;
+  structureBlockedReason?: string;
+  reviewBlockedReason?: string;
+}
+
 export interface ActDetail extends ActSummary {
   dataAto: string | null;
   palavrasChave: string[];
@@ -175,6 +206,8 @@ export interface ActDetail extends ActSummary {
   prefixoTitulo?: string | null;
   etapaEditorial?: string;
   textoEstruturadoDisponivel?: boolean;
+  textoIdentificadoImportacao?: string | null;
+  textoIdentificadoOrigem?: string | null;
 }
 
 export interface SearchResponse {
@@ -193,6 +226,12 @@ export interface FilterCounts {
   anos: Record<string, number>;
 }
 
+export interface PublicOriginOrgOption {
+  id: string;
+  nome: string;
+  sigla?: string | null;
+}
+
 export interface AdminKpis {
   total: number;
   vigentes: number;
@@ -204,6 +243,8 @@ export interface AdminAct extends ActSummary {
   statusPublicacao: string;
   etapaEditorial?: string;
   updatedAt: string;
+  responsavelEstruturacao?: ActUserRef | null;
+  responsavelRevisao?: ActUserRef | null;
 }
 
 export interface AdminActDetail extends ActDetail {
@@ -212,6 +253,14 @@ export interface AdminActDetail extends ActDetail {
   editionOpen?: boolean;
   hierarchyValid?: boolean;
   observacoesInternas?: string | null;
+  textoIdentificadoImportacao?: string | null;
+  textoIdentificadoOrigem?: string | null;
+  responsavelEstruturacao?: ActUserRef | null;
+  responsavelRevisao?: ActUserRef | null;
+  responsavelEstruturacaoId?: string | null;
+  responsavelRevisaoId?: string | null;
+  access?: ActAccessHints;
+  assignmentWarnings?: string[];
 }
 
 export interface AdminListResponse {

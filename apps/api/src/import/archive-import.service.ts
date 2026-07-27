@@ -9,6 +9,7 @@ import {
   ArchiveImportItemStatus,
   AttachmentType,
   EditorialStage,
+  IdentifiedTextOrigin,
   ImportFormat,
   PublicationStatus,
 } from '@prisma/client';
@@ -19,8 +20,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { buildActSlug, formatActCode } from '../normative-acts/normative-acts.utils';
 import { recordInternalHistory } from '../normative-acts/act-versioning.utils';
 import { extractActMetadata } from './metadata.parser';
+import { extractIdentifiedText } from './identified-text.utils';
 import { OcrService } from './ocr.service';
 import { TextExtractService } from './text-extract.service';
+import { refreshSearchVector } from '../normative-acts/search.utils';
 
 const LOW_CONFIDENCE = 55;
 
@@ -122,18 +125,47 @@ export class ArchiveImportService {
     const filePath = path.join(this.uploadDir, item.arquivo);
     let text = '';
     let usedOcr = false;
+    let identifiedOrigem: IdentifiedTextOrigin | null = null;
+    let textoIdentificado: string | null = null;
+    let textoIdentificadoAusente = false;
 
-    if (item.formato === ImportFormat.docx) {
-      const result = await this.textExtract.extractDocx(filePath);
-      text = result.text;
-    } else {
-      const result = await this.textExtract.extractPdf(filePath);
-      text = result.text;
-      if (result.needsOcr || text.trim().length < 80) {
-        // OCR leve: só primeiras páginas para metadados/ementa
-        const pages = await this.ocr.processPdf(filePath, { maxPages: 3 });
-        text = pages.map((p) => p.texto).join('\n\n');
-        usedOcr = true;
+    try {
+      const identified = await extractIdentifiedText(
+        filePath,
+        item.formato,
+        this.textExtract,
+        this.ocr,
+      );
+      textoIdentificado = identified.text;
+      identifiedOrigem = identified.origem;
+      usedOcr = identified.usedOcr;
+      text = identified.text ?? '';
+      if (!identified.text) textoIdentificadoAusente = true;
+    } catch {
+      textoIdentificadoAusente = true;
+    }
+
+    if (!text.trim()) {
+      // Fallback leve para metadados quando a extração integral falhou
+      if (item.formato === ImportFormat.docx) {
+        try {
+          const result = await this.textExtract.extractDocx(filePath);
+          text = result.text;
+        } catch {
+          /* ignore */
+        }
+      } else {
+        try {
+          const result = await this.textExtract.extractPdf(filePath);
+          text = result.text;
+          if (result.needsOcr || text.trim().length < 80) {
+            const pages = await this.ocr.processPdf(filePath, { maxPages: 3 });
+            text = pages.map((p) => p.texto).join('\n\n');
+            usedOcr = true;
+          }
+        } catch {
+          /* ignore */
+        }
       }
     }
 
@@ -176,6 +208,9 @@ export class ArchiveImportService {
         existingActId,
         formato: usedOcr ? ImportFormat.pdf_ocr : item.formato,
         erroMensagem: null,
+        textoIdentificadoImportacao: textoIdentificado,
+        textoIdentificadoOrigem: identifiedOrigem,
+        textoIdentificadoAusente,
       },
     });
   }
@@ -263,6 +298,9 @@ export class ArchiveImportService {
           erroMensagem: i.erroMensagem,
           resolucao: i.resolucao,
           actId: i.actId,
+          textoIdentificadoImportacao: i.textoIdentificadoImportacao,
+          textoIdentificadoOrigem: i.textoIdentificadoOrigem,
+          textoIdentificadoAusente: i.textoIdentificadoAusente,
           existingAct: existing
             ? {
                 id: existing.id,
@@ -275,6 +313,19 @@ export class ArchiveImportService {
         };
       }),
     };
+  }
+
+  async getItemPreviewHtml(batchId: string, itemId: string) {
+    const item = await this.prisma.archiveImportItem.findFirst({
+      where: { id: itemId, batchId },
+    });
+    if (!item?.arquivo) throw new NotFoundException('Arquivo não encontrado');
+    if (item.formato !== ImportFormat.docx) {
+      throw new BadRequestException('Preview HTML disponível apenas para DOCX');
+    }
+    const filePath = path.join(this.uploadDir, item.arquivo);
+    const html = await this.textExtract.docxToHtml(filePath);
+    return { html, filename: item.nomeArquivo };
   }
 
   async getItemFilePath(batchId: string, itemId: string) {
@@ -298,6 +349,7 @@ export class ArchiveImportService {
       dataAto?: string | null;
       ementa?: string | null;
       resolucao?: 'ignore' | 'link' | 'create' | null;
+      textoIdentificadoImportacao?: string | null;
     },
   ) {
     const item = await this.prisma.archiveImportItem.findFirst({
@@ -362,6 +414,10 @@ export class ArchiveImportService {
         existingActId,
         status,
         resolucao: body.resolucao !== undefined ? body.resolucao : item.resolucao,
+        ...(body.textoIdentificadoImportacao !== undefined && {
+          textoIdentificadoImportacao: body.textoIdentificadoImportacao,
+          textoIdentificadoAusente: !body.textoIdentificadoImportacao?.trim(),
+        }),
       },
     });
 
@@ -492,6 +548,7 @@ export class ArchiveImportService {
       }
       if (resolucao === 'link' && item.existingActId) {
         await this.attachOriginalToAct(item.existingActId, item, userId);
+        await this.applyIdentifiedTextToAct(item.existingActId, item);
         await this.prisma.archiveImportItem.update({
           where: { id: itemId },
           data: {
@@ -562,6 +619,8 @@ export class ArchiveImportService {
           orgaoOrigem: 'Importação de acervo',
           statusPublicacao: PublicationStatus.rascunho,
           etapaEditorial: EditorialStage.somente_arquivo_original,
+          textoIdentificadoImportacao: item.textoIdentificadoImportacao,
+          textoIdentificadoOrigem: item.textoIdentificadoOrigem,
         },
       });
 
@@ -604,6 +663,8 @@ export class ArchiveImportService {
       return created;
     });
 
+    await refreshSearchVector(this.prisma, act.id);
+
     await recordInternalHistory(this.prisma, {
       actId: act.id,
       userId,
@@ -617,6 +678,24 @@ export class ArchiveImportService {
       codigo: formatActCode(act.tipo, act.numero, act.ano),
       action: 'criado',
     };
+  }
+
+  private async applyIdentifiedTextToAct(
+    actId: string,
+    item: {
+      textoIdentificadoImportacao: string | null;
+      textoIdentificadoOrigem: IdentifiedTextOrigin | null;
+    },
+  ) {
+    if (!item.textoIdentificadoImportacao?.trim()) return;
+    await this.prisma.normativeAct.update({
+      where: { id: actId },
+      data: {
+        textoIdentificadoImportacao: item.textoIdentificadoImportacao,
+        textoIdentificadoOrigem: item.textoIdentificadoOrigem,
+      },
+    });
+    await refreshSearchVector(this.prisma, actId);
   }
 
   private async copyOriginalToPermanent(item: {
@@ -677,7 +756,14 @@ export class ArchiveImportService {
 
   private async attachOriginalToAct(
     actId: string,
-    item: { id?: string; arquivo: string; nomeArquivo: string; formato: ImportFormat },
+    item: {
+      id?: string;
+      arquivo: string;
+      nomeArquivo: string;
+      formato: ImportFormat;
+      textoIdentificadoImportacao?: string | null;
+      textoIdentificadoOrigem?: IdentifiedTextOrigin | null;
+    },
     userId: string,
   ) {
     const permanent = await this.copyOriginalToPermanent(item);

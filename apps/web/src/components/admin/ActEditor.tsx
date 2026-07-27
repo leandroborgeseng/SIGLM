@@ -18,14 +18,17 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  FileSearch,
   GripVertical,
   History,
   Pencil,
   Plus,
   Trash2,
+  Wand2,
 } from 'lucide-react';
 import { AddUnitDialog } from '@/components/admin/AddUnitDialog';
 import { ActMetadataAttachments } from '@/components/admin/ActMetadataAttachments';
+import { IdentifiedImportTextDialog } from '@/components/admin/IdentifiedImportTextDialog';
 import { AdminTopbar } from '@/components/admin/AdminShell';
 import { DeleteUnitDialog } from '@/components/admin/DeleteUnitDialog';
 import { EditUnitDialog } from '@/components/admin/EditUnitDialog';
@@ -40,22 +43,28 @@ import { UnitTextEditor } from '@/components/admin/UnitTextEditor';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { useToast } from '@/components/ui/Toast';
 import {
   addUnit,
   createActEdition,
   deleteUnit,
+  getAdminFilterOptions,
+  identifyActTextFromOriginal,
   listActAttachments,
   listOrgans,
   listPublicationMedia,
   listSignatories,
   publishAct,
   restoreUnitVersion,
+  returnActToStructuring,
   saveLegislativeEffects,
   saveUnits,
   startActStructuring,
+  structureActFromOriginal,
   submitForReview,
   updateAct,
+  updateActIdentifiedImportText,
   type AdminSignatory,
   type OriginOrg,
   type PublicationMedium,
@@ -86,7 +95,7 @@ import {
   type LetterSpacing,
   type UnitFormatacao,
 } from '@/lib/rich-text';
-import type { ActAttachment, ActDetail, LegislativeEffect, NormativeUnit, UnitType } from '@/lib/types';
+import type { ActAttachment, AdminActDetail, LegislativeEffect, NormativeUnit, UnitType } from '@/lib/types';
 import {
   type AddContext,
   assessUnitsHierarchy,
@@ -101,11 +110,8 @@ import {
   UNIT_TYPE_LABELS,
 } from '@/lib/unit-hierarchy';
 
-interface EditorAct extends ActDetail {
-  statusPublicacao?: string;
-  editionOpen?: boolean;
+interface EditorAct extends AdminActDetail {
   hierarchyValid?: boolean;
-  observacoesInternas?: string | null;
   updatedAt?: string;
 }
 
@@ -223,12 +229,22 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const [signatories, setSignatories] = useState<ActSignatoryDraft[]>(() =>
     initialSignatories(initialAct),
   );
+  const [responsavelEstruturacaoId, setResponsavelEstruturacaoId] = useState(
+    initialAct.responsavelEstruturacaoId ?? initialAct.responsavelEstruturacao?.id ?? '',
+  );
+  const [responsavelRevisaoId, setResponsavelRevisaoId] = useState(
+    initialAct.responsavelRevisaoId ?? initialAct.responsavelRevisao?.id ?? '',
+  );
+  const [adminUsers, setAdminUsers] = useState<
+    { id: string; nome: string; email: string; ativo: boolean }[]
+  >([]);
   const [organs, setOrgans] = useState<OriginOrg[]>([]);
   const [publicationMedia, setPublicationMedia] = useState<PublicationMedium[]>([]);
   const [signatoryCatalog, setSignatoryCatalog] = useState<AdminSignatory[]>([]);
   const [addOrgaoId, setAddOrgaoId] = useState('');
   const [addSignatoryId, setAddSignatoryId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [autoStructuring, setAutoStructuring] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addContext, setAddContext] = useState<AddContext>({ mode: 'end' });
@@ -243,6 +259,9 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   const [panelHeight, setPanelHeight] = useState(DEFAULT_COMPARE_PANEL_HEIGHT);
   const [mobilePane, setMobilePane] = useState<'original' | 'texto'>('texto');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [identifiedTextOpen, setIdentifiedTextOpen] = useState(false);
+  const [identifyingText, setIdentifyingText] = useState(false);
+  const [savingIdentifiedText, setSavingIdentifiedText] = useState(false);
 
   const currentMeta = (): MetaFingerprint => ({
     assunto,
@@ -261,7 +280,27 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
 
   const editable =
     act.statusPublicacao !== 'publicado' || Boolean(act.editionOpen);
+  const isFileOnlyStage = act.etapaEditorial === 'somente_arquivo_original';
+  const access = act.access;
+  /** Metadados/anexos podem ser editados; Texto Estruturado só após iniciar estruturação. */
+  const structureEditable =
+    editable && !isFileOnlyStage && (access?.canEditStructure ?? true);
+  const structureBlockedReason = access?.structureBlockedReason;
+  const reviewBlockedReason = access?.reviewBlockedReason;
   const dirty = fingerprint(currentMeta()) !== savedFingerprint.current;
+
+  useEffect(() => {
+    getAdminFilterOptions()
+      .then((opts) => {
+        const linked = [
+          initialAct.responsavelEstruturacao,
+          initialAct.responsavelRevisao,
+        ].filter(Boolean) as { id: string; nome: string; email: string; ativo: boolean }[];
+        const extras = linked.filter((u) => !opts.users.some((x) => x.id === u.id));
+        setAdminUsers([...opts.users, ...extras]);
+      })
+      .catch(() => undefined);
+  }, [initialAct.responsavelEstruturacao, initialAct.responsavelRevisao]);
 
   useEffect(() => {
     listOrgans(false)
@@ -376,6 +415,8 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       cargo: s.cargo,
       ordem: i,
     })),
+    responsavelEstruturacaoId: responsavelEstruturacaoId || null,
+    responsavelRevisaoId: responsavelRevisaoId || null,
   });
 
   const syncFromAct = (updated: EditorAct) => {
@@ -390,7 +431,41 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setPrefixoTituloModo((updated.prefixoTituloModo as PrefixoTituloModo) || 'none');
     setPrefixoTitulo(updated.prefixoTitulo ?? '');
     setSignatories(initialSignatories(updated));
+    setResponsavelEstruturacaoId(
+      updated.responsavelEstruturacaoId ?? updated.responsavelEstruturacao?.id ?? '',
+    );
+    setResponsavelRevisaoId(
+      updated.responsavelRevisaoId ?? updated.responsavelRevisao?.id ?? '',
+    );
     savedFingerprint.current = fingerprint(metaFromAct(updated, updated.units));
+  };
+
+  const runIdentifyTextFromOriginal = async () => {
+    setIdentifyingText(true);
+    try {
+      const updated = await identifyActTextFromOriginal(act.id);
+      syncFromAct(updated as EditorAct);
+      toast('Texto identificado a partir do arquivo original', 'ok');
+      setIdentifiedTextOpen(true);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao identificar texto', 'danger');
+    } finally {
+      setIdentifyingText(false);
+    }
+  };
+
+  const saveIdentifiedImportText = async (text: string) => {
+    setSavingIdentifiedText(true);
+    try {
+      const updated = await updateActIdentifiedImportText(act.id, text);
+      syncFromAct(updated as EditorAct);
+      toast('Texto identificado salvo', 'ok');
+      setIdentifiedTextOpen(false);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao salvar texto', 'danger');
+    } finally {
+      setSavingIdentifiedText(false);
+    }
   };
 
   const moveOrgao = (index: number, dir: -1 | 1) => {
@@ -444,19 +519,19 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   };
 
   const moveUnit = (index: number, direction: -1 | 1) => {
-    if (!editable) return;
+    if (!structureEditable) return;
     const next = moveUnitBlock(units, index, direction);
     if (next !== units) setUnits(next);
   };
 
   const canMove = (index: number, direction: -1 | 1) => {
-    if (!editable) return false;
+    if (!structureEditable) return false;
     const next = moveUnitBlock(units, index, direction);
     return next !== units;
   };
 
   const onDragStart = (index: number, e: ReactDragEvent) => {
-    if (!editable) {
+    if (!structureEditable) {
       e.preventDefault();
       return;
     }
@@ -470,7 +545,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   };
 
   const onDrop = (index: number) => {
-    if (!editable || dragIndex === null) {
+    if (!structureEditable || dragIndex === null) {
       setDragIndex(null);
       return;
     }
@@ -481,7 +556,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   };
 
   const updateUnitText = (id: string, texto: string) => {
-    if (!editable) return;
+    if (!structureEditable) return;
     setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, texto } : u)));
   };
 
@@ -533,7 +608,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   };
 
   const updateUnitFormatacao = (id: string, patch: Partial<UnitFormatacao>) => {
-    if (!editable) return;
+    if (!structureEditable) return;
     setUnits((prev) =>
       prev.map((u) =>
         u.id === id
@@ -650,8 +725,8 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     setSaving(true);
     setSaveStatus(auto ? 'autosaving' : 'saving');
     try {
-      await updateAct(act.id, metaPayload());
-      const updated = await persistUnits();
+      const metaUpdated = await updateAct(act.id, metaPayload());
+      const updated = isFileOnlyStage ? metaUpdated : await persistUnits();
       // Só sincroniza se o usuário não editou durante o await.
       if (gen === saveGenRef.current && fingerprint(currentMeta()) === fpBefore) {
         syncFromAct(updated);
@@ -670,8 +745,8 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         const token = await forceRefreshAccessToken();
         if (token) {
           try {
-            await updateAct(act.id, metaPayload());
-            const updated = await persistUnits();
+            const metaUpdated = await updateAct(act.id, metaPayload());
+            const updated = isFileOnlyStage ? metaUpdated : await persistUnits();
             if (gen === saveGenRef.current && fingerprint(currentMeta()) === fpBefore) {
               syncFromAct(updated);
               clearEditorDraft(act.id);
@@ -800,6 +875,20 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     }
   };
 
+  const handleReturnToStructuring = async () => {
+    setSaving(true);
+    try {
+      const updated = await returnActToStructuring(act.id);
+      syncFromAct(updated);
+      toast('Ato devolvido para estruturação', 'ok');
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao devolver', 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handlePublish = async () => {
     setSaving(true);
     try {
@@ -862,6 +951,57 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     }
   };
 
+  const handleAutoStructure = async () => {
+    if (!originalFile) {
+      toast(
+        'Anexe o arquivo original do ato em Metadados para habilitar a estruturação automática',
+        'warn',
+      );
+      return;
+    }
+    if (autoStructuring || saving) return;
+
+    const hasUnits = units.length > 0;
+    if (hasUnits) {
+      const ok = window.confirm(
+        'ATENÇÃO: toda a estrutura atual será SUBSTITUÍDA pela detectada no arquivo original.\n\n' +
+          'Um ponto de recuperação será criado no histórico interno antes da substituição.\n\n' +
+          'Deseja continuar?',
+      );
+      if (!ok) return;
+    } else {
+      const ok = window.confirm(
+        'Estruturar automaticamente a partir do arquivo original?\n\n' +
+          'Revise o resultado no editor antes de publicar.',
+      );
+      if (!ok) return;
+    }
+
+    if (dirty && !window.confirm('Há alterações não salvas que serão descartadas. Continuar?')) {
+      return;
+    }
+
+    setAutoStructuring(true);
+    try {
+      clearEditorDraft(act.id);
+      const result = await structureActFromOriginal(act.id, {
+        confirmReplace: hasUnits,
+      });
+      syncFromAct(result.act);
+      const parts = [
+        `${result.elementCount} elemento(s) detectado(s). Revise o texto estruturado antes de publicar.`,
+      ];
+      if (result.ocrNote) parts.push(result.ocrNote);
+      if (result.ementaNote) parts.push(result.ementaNote);
+      toast(parts.join(' '), 'ok');
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro na estruturação automática', 'danger');
+    } finally {
+      setAutoStructuring(false);
+    }
+  };
+
   const handleRestoreVersion = async (unitId: string, versionId: string) => {
     if (!versionId) return;
     setSaving(true);
@@ -890,14 +1030,30 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     publicado: 'Publicado',
   };
 
-  const isFileOnlyStage = act.etapaEditorial === 'somente_arquivo_original';
   const canPublish =
-    can('acts:publish') &&
+    (access?.canPublish ?? can('acts:publish')) &&
     (act.statusPublicacao === 'em_revisao' ||
       (act.statusPublicacao === 'publicado' && Boolean(act.editionOpen)) ||
       (act.statusPublicacao === 'rascunho' && isFileOnlyStage));
-  const hasPublicPage =
-    act.statusPublicacao === 'publicado' || Boolean(act.editionOpen);
+  const canSubmitReview =
+    (access?.canEditStructure ?? can('acts:write')) &&
+    editable &&
+    act.statusPublicacao !== 'publicado' &&
+    !isFileOnlyStage;
+  const canReturnToStructuring =
+    (access?.canReview ?? can('acts:write')) &&
+    act.etapaEditorial === 'aguardando_revisao';
+  const sameResponsavel =
+    responsavelEstruturacaoId &&
+    responsavelRevisaoId &&
+    responsavelEstruturacaoId === responsavelRevisaoId;
+
+  const userSelectOptions = adminUsers.map((u) => ({
+    value: u.id,
+    label: u.ativo ? u.nome : `${u.nome} (inativo)`,
+    searchText: `${u.nome} ${u.email}`,
+  }));
+  const hasPublicPage = act.statusPublicacao === 'publicado';
   const publicPortalUrl = act.slug ? actUrl(act.slug) : '/legislacao';
 
   const saveStatusLabel =
@@ -1021,16 +1177,24 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 {saving && saveStatus !== 'autosaving' ? 'Salvando...' : 'Salvar alterações'}
               </Button>
             )}
-            {can('acts:write') &&
-              editable &&
-              act.statusPublicacao !== 'publicado' &&
-              !isFileOnlyStage && (
-              <Button variant="tonal" size="sm" onClick={handleSubmitReview} disabled={saving}>
-                Enviar para revisão
+            {canSubmitReview && (
+              <Button
+                variant="tonal"
+                size="sm"
+                onClick={handleSubmitReview}
+                disabled={saving}
+                title={structureBlockedReason ?? undefined}
+              >
+                Devolver para estruturação
               </Button>
             )}
             {canPublish && (
-              <Button size="sm" onClick={handlePublish} disabled={saving}>
+              <Button
+                size="sm"
+                onClick={handlePublish}
+                disabled={saving}
+                title={reviewBlockedReason ?? undefined}
+              >
                 {act.editionOpen ? 'Publicar nova versão' : 'Publicar'}
               </Button>
             )}
@@ -1067,6 +1231,12 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         <div className="mx-6 mt-4 rounded-[10px] border border-brand/30 bg-brand/5 px-4 py-3 text-[13px] text-ink-2">
           Você está editando uma <strong>versão de trabalho</strong>. A consulta pública continua
           exibindo a última versão publicada até você publicar esta correção.
+        </div>
+      )}
+      {structureBlockedReason && can('acts:write') && !isFileOnlyStage && (
+        <div className="mx-6 mt-4 flex gap-2 rounded-[10px] border border-warn/40 bg-warn/5 px-4 py-3 text-[13px] text-ink-2">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+          <span>{structureBlockedReason}</span>
         </div>
       )}
 
@@ -1143,7 +1313,64 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                   ))}
               </Select>
             </div>
-            <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2">
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">
+                Responsável pela estruturação
+              </label>
+              <SearchableSelect
+                value={responsavelEstruturacaoId}
+                onChange={(v) => setResponsavelEstruturacaoId(v ?? '')}
+                options={userSelectOptions.filter(
+                  (o) => adminUsers.find((u) => u.id === o.value)?.ativo !== false || o.value === responsavelEstruturacaoId,
+                )}
+                allLabel="Nenhum"
+                searchPlaceholder="Buscar usuário…"
+                disabled={!editable}
+                aria-label="Responsável pela estruturação"
+              />
+              {act.responsavelEstruturacao && !act.responsavelEstruturacao.ativo && (
+                <p className="mt-1 text-[11px] text-warn">
+                  Responsável atual inativo — selecione outro usuário ativo para substituir.
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] text-ink-3">
+                Responsável pela revisão e publicação
+              </label>
+              <SearchableSelect
+                value={responsavelRevisaoId}
+                onChange={(v) => setResponsavelRevisaoId(v ?? '')}
+                options={userSelectOptions.filter(
+                  (o) => adminUsers.find((u) => u.id === o.value)?.ativo !== false || o.value === responsavelRevisaoId,
+                )}
+                allLabel="Nenhum"
+                searchPlaceholder="Buscar usuário…"
+                disabled={!editable}
+                aria-label="Responsável pela revisão e publicação"
+              />
+              {act.responsavelRevisao && !act.responsavelRevisao.ativo && (
+                <p className="mt-1 text-[11px] text-warn">
+                  Responsável atual inativo — selecione outro usuário ativo para substituir.
+                </p>
+              )}
+            </div>
+            {sameResponsavel && (
+              <div className="rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-[12px] text-ink-3">
+                O mesmo usuário está designado para estruturação e revisão/publicação. Isso é
+                permitido, mas confirme se reflete o fluxo desejado.
+              </div>
+            )}
+            {act.assignmentWarnings?.map((w) => (
+              <div
+                key={w}
+                className="flex gap-2 rounded-[10px] border border-warn/40 bg-warn/5 px-3 py-2 text-[12px] text-ink-2"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+                <span>{w}</span>
+              </div>
+            ))}
+            <div className="rounded-[10px] border border-dashed border-line px-3 py-2">
               <p className="text-[11px] uppercase tracking-wide text-ink-4">Título formal</p>
               <p className="mt-0.5 text-[13px] font-semibold uppercase text-ink">
                 {tituloFormalPreview}
@@ -1383,6 +1610,41 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 </div>
               )}
             </div>
+            {(act.textoIdentificadoImportacao || originalFile) && (
+              <div className="rounded-[10px] border border-line-2 bg-surface-2 px-3 py-2.5">
+                <p className="text-[11px] uppercase tracking-wide text-ink-4">
+                  Texto da importação
+                </p>
+                {act.textoIdentificadoImportacao ? (
+                  <button
+                    type="button"
+                    className="mt-1 flex items-center gap-1.5 text-[12px] text-brand hover:underline"
+                    onClick={() => setIdentifiedTextOpen(true)}
+                  >
+                    <FileSearch className="h-3.5 w-3.5" />
+                    Consultar texto identificado na importação
+                  </button>
+                ) : (
+                  editable &&
+                  can('acts:write') &&
+                  originalFile && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="mt-1 h-auto px-0 text-[12px] text-brand"
+                      disabled={identifyingText}
+                      onClick={() => void runIdentifyTextFromOriginal()}
+                    >
+                      <FileSearch className="h-3.5 w-3.5" />
+                      {identifyingText
+                        ? 'Identificando texto…'
+                        : 'Identificar texto do arquivo original'}
+                    </Button>
+                  )
+                )}
+              </div>
+            )}
             <ActMetadataAttachments
               actId={act.id}
               editable={editable && can('acts:write')}
@@ -1511,30 +1773,61 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         >
           <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
             <h2 className="text-section">Texto estruturado</h2>
-            <div
-              className={cn(
-                'flex items-center gap-2 text-[12.5px] font-semibold',
-                !hierarchyValid
-                  ? 'text-danger'
+            <div className="flex flex-wrap items-center gap-2">
+              {can('acts:write') && structureEditable && (
+                <Button
+                  variant="tonal"
+                  size="sm"
+                  type="button"
+                  disabled={!originalFile || autoStructuring || saving}
+                  title={
+                    !originalFile
+                      ? 'Anexe o arquivo original em Metadados para habilitar'
+                      : 'Detectar elementos a partir do arquivo original vinculado'
+                  }
+                  onClick={() => void handleAutoStructure()}
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  {autoStructuring ? 'Estruturando…' : 'Estruturar automaticamente'}
+                </Button>
+              )}
+              <div
+                className={cn(
+                  'flex items-center gap-2 text-[12.5px] font-semibold',
+                  !hierarchyValid
+                    ? 'text-danger'
+                    : hierarchy.hasNonstandardLinks
+                      ? 'text-warn'
+                      : 'text-ok',
+                )}
+              >
+                {!hierarchyValid ? (
+                  <AlertCircle className="h-4 w-4" />
+                ) : hierarchy.hasNonstandardLinks ? (
+                  <AlertCircle className="h-4 w-4" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" />
+                )}
+                {!hierarchyValid
+                  ? 'Estrutura inconsistente — revise vínculos'
                   : hierarchy.hasNonstandardLinks
-                    ? 'text-warn'
-                    : 'text-ok',
-              )}
-            >
-              {!hierarchyValid ? (
-                <AlertCircle className="h-4 w-4" />
-              ) : hierarchy.hasNonstandardLinks ? (
-                <AlertCircle className="h-4 w-4" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4" />
-              )}
-              {!hierarchyValid
-                ? 'Estrutura inconsistente — revise vínculos'
-                : hierarchy.hasNonstandardLinks
-                  ? 'Estrutura atípica permitida (ato fiel)'
-                  : 'Hierarquia íntegra'}
+                    ? 'Estrutura atípica permitida (ato fiel)'
+                    : 'Hierarquia íntegra'}
+              </div>
             </div>
           </div>
+          {!originalFile && can('acts:write') && structureEditable && (
+            <p className="mb-4 shrink-0 rounded-[10px] border border-line bg-surface-2 px-3 py-2.5 text-[13px] text-ink-2">
+              Para usar <strong>Estruturar automaticamente</strong>, anexe o arquivo original do ato
+              em Metadados.
+            </p>
+          )}
+          {isFileOnlyStage && (
+            <p className="mb-4 shrink-0 rounded-[10px] border border-line bg-surface-2 px-3 py-2.5 text-[13px] text-ink-2">
+              A estruturação deste ato ainda não foi iniciada. Para cadastrar o texto estruturado,
+              utilize a ação <strong>Iniciar estruturação</strong>.
+            </p>
+          )}
           {hierarchy.warnings.length > 0 && (
             <p className="mb-3 shrink-0 text-[12px] text-ink-3">{hierarchy.warnings[0]}</p>
           )}
@@ -1556,7 +1849,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                 <div
                   key={unit.id}
                   onDragOver={(e) => {
-                    if (!editable || dragIndex === null) return;
+                    if (!structureEditable || dragIndex === null) return;
                     e.preventDefault();
                   }}
                   onDrop={() => onDrop(index)}
@@ -1606,7 +1899,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                       <Badge variant="neutral" className="text-[10px]">
                         {UNIT_TYPE_LABELS[unit.tipoUnidade]}
                       </Badge>
-                      {editable && can('acts:write') && (
+                      {structureEditable && can('acts:write') && (
                         <>
                           <button
                             type="button"
@@ -1655,10 +1948,10 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                     <UnitTextEditor
                       value={unit.texto}
                       onChange={(html) => updateUnitText(unit.id, html)}
-                      disabled={!editable}
+                      disabled={!structureEditable}
                       rows={unit.tipoUnidade === 'artigo' || unit.tipoUnidade === 'preambulo' ? 3 : 2}
                     />
-                    {unit.tipoUnidade === 'texto_simples' && editable && (
+                    {unit.tipoUnidade === 'texto_simples' && structureEditable && (
                       <div className="space-y-2 rounded-[8px] border border-line bg-surface px-3 py-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-4">
                           Formatação
@@ -1727,7 +2020,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                           redacaoChildUnits={childUnitsForRedacao(unit.id)}
                         />
                       )}
-                    {can('acts:write') && editable && unit.versoes.length > 1 && (
+                    {can('acts:write') && structureEditable && unit.versoes.length > 1 && (
                       <Select
                         defaultValue=""
                         onChange={(e) => {
@@ -1748,7 +2041,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
                         ))}
                       </Select>
                     )}
-                    {can('acts:write') && editable && (
+                    {can('acts:write') && structureEditable && (
                       <div className="flex flex-wrap gap-2 pt-1">
                         <button
                           type="button"
@@ -1800,7 +2093,7 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
             })}
           </div>
 
-          {can('acts:write') && editable && (
+          {can('acts:write') && structureEditable && (
             <Button
               variant="tonal"
               size="sm"
@@ -1840,6 +2133,14 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         busy={deleting}
         onClose={() => !deleting && setDeleteTarget(null)}
         onConfirm={handleDeleteUnit}
+      />
+      <IdentifiedImportTextDialog
+        open={identifiedTextOpen}
+        onClose={() => setIdentifiedTextOpen(false)}
+        origem={act.textoIdentificadoOrigem}
+        texto={act.textoIdentificadoImportacao}
+        saving={savingIdentifiedText}
+        onSave={editable && can('acts:write') ? saveIdentifiedImportText : undefined}
       />
     </div>
   );

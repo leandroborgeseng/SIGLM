@@ -1,23 +1,50 @@
 'use client';
 
 import { Input } from '@/components/ui/Form';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
+import { formatOriginOrgLabel } from '@/lib/format';
+import type { PublicOriginOrgOption } from '@/lib/types';
 
 export function AdvancedFilters({
   numero,
   assunto,
   publicadoDe,
   publicadoAte,
+  orgaoOrigemId,
+  orgaos,
   onChange,
 }: {
   numero: string;
   assunto: string;
   publicadoDe: string;
   publicadoAte: string;
+  orgaoOrigemId: string;
+  orgaos: PublicOriginOrgOption[];
   onChange: (updates: Record<string, string | null>) => void;
 }) {
+  const orgOptions = orgaos.map((o) => ({
+    value: o.id,
+    label: formatOriginOrgLabel(o),
+    searchText: `${o.sigla ?? ''} ${o.nome}`.trim(),
+  }));
+
   return (
     <div className="space-y-3 border-t border-line-2 pt-4">
       <h2 className="text-section">Busca avançada</h2>
+      <div>
+        <label htmlFor="filter-orgao" className="mb-1 block text-[12px] text-ink-3">
+          Órgão de origem
+        </label>
+        <SearchableSelect
+          id="filter-orgao"
+          aria-label="Órgão de origem"
+          value={orgaoOrigemId}
+          onChange={(v) => onChange({ orgaoOrigemId: v })}
+          options={orgOptions}
+          allLabel="Todos os órgãos"
+          searchPlaceholder="Buscar por sigla ou nome…"
+        />
+      </div>
       <div>
         <label htmlFor="filter-numero" className="mb-1 block text-[12px] text-ink-3">
           Número do ato

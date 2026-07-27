@@ -25,7 +25,9 @@ export default async function HistoricoInternoPage({
 
   return (
     <ToastProvider>
-      <ActInternalHistoryPanel actId={id} actLabel={label} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ActInternalHistoryPanel actId={id} actLabel={label} />
+      </div>
     </ToastProvider>
   );
 }

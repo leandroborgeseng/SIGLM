@@ -11,7 +11,8 @@ export type AdminPermission =
   | 'imports:manage'
   | 'ocr:review'
   | 'users:manage'
-  | 'audit:read';
+  | 'audit:read'
+  | 'orgs:all';
 
 export const ADMIN_NAV: {
   href: string;
@@ -36,4 +37,14 @@ export function hasPermission(
 
 export function filterNavByPermissions(permissions: string[] | undefined) {
   return ADMIN_NAV.filter((item) => hasPermission(permissions, item.permission));
+}
+
+/** Permissão mínima exigida pela rota admin atual (para aviso ao trocar contexto). */
+export function routeRequiredPermission(pathname: string): AdminPermission | null {
+  if (pathname.startsWith('/admin/importar')) return 'imports:manage';
+  if (pathname.startsWith('/admin/consolidar')) return 'acts:consolidate';
+  if (pathname.startsWith('/admin/administracao')) return 'users:manage';
+  if (pathname.match(/\/admin\/atos\/[^/]+/)) return 'acts:write';
+  if (pathname.startsWith('/admin/atos')) return 'acts:read';
+  return null;
 }

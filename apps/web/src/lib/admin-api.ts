@@ -1,4 +1,4 @@
-import type { ActAttachment, ActDetail, AdminListResponse, LegislativeEffect } from './types';
+import type { ActAttachment, ActDetail, AdminActDetail, AdminListResponse, LegislativeEffect } from './types';
 import { AuthError, ForbiddenError } from './api';
 import { getApiBaseUrl } from './api-url';
 import {
@@ -104,7 +104,21 @@ export interface AdminUser {
   nome: string;
   email: string;
   ativo: boolean;
+  mustChangePassword: boolean;
   role: { id: string; nome: string; descricao: string | null };
+  rolesCount: number;
+  primaryOrg: { id: string; nome: string; sigla?: string | null } | null;
+  orgsCount: number;
+  roleLinks: {
+    roleId: string;
+    isPrimary: boolean;
+    role: { id: string; nome: string; descricao: string | null };
+  }[];
+  orgLinks: {
+    orgaoId: string;
+    isPrimary: boolean;
+    orgao: { id: string; nome: string; sigla?: string | null };
+  }[];
 }
 
 export interface AdminRole {
@@ -192,7 +206,16 @@ export function listUsers(token?: string) {
 }
 
 export function createUser(
-  data: { nome: string; email: string; senha: string; roleId: string },
+  data: {
+    nome: string;
+    email: string;
+    senha: string;
+    roleIds: string[];
+    primaryRoleId?: string;
+    orgaoIds?: string[];
+    primaryOrgaoId?: string;
+    mustChangePassword?: boolean;
+  },
   token?: string,
 ) {
   return adminFetch<AdminUser>('/admin/users', {
@@ -203,7 +226,17 @@ export function createUser(
 
 export function updateUser(
   id: string,
-  data: { nome?: string; email?: string; senha?: string; roleId?: string; ativo?: boolean },
+  data: {
+    nome?: string;
+    email?: string;
+    senha?: string;
+    roleIds?: string[];
+    primaryRoleId?: string;
+    orgaoIds?: string[];
+    primaryOrgaoId?: string | null;
+    ativo?: boolean;
+    mustChangePassword?: boolean;
+  },
   token?: string,
 ) {
   return adminFetch<AdminUser>(`/admin/users/${id}`, {
@@ -222,6 +255,35 @@ export function listPermissions(token?: string) {
 
 export function setRolePermissions(roleId: string, permissionIds: string[], token?: string) {
   return adminFetch<AdminRole>(`/admin/roles/${roleId}/permissions`, {
+    method: 'PATCH',
+    body: JSON.stringify({ permissionIds }),
+  }, token);
+}
+
+export interface UserPermissionsDetail {
+  userId: string;
+  userNome: string;
+  activeRoleId?: string;
+  role: {
+    id: string;
+    nome: string;
+    permissions: { id: string; chave: string }[];
+  };
+  linkedRoles?: { id: string; nome: string; isPrimary: boolean }[];
+  extraPermissions: { id: string; chave: string }[];
+  effectivePermissions: {
+    id: string;
+    chave: string;
+    source: 'role' | 'extra';
+  }[];
+}
+
+export function getUserPermissions(userId: string, token?: string) {
+  return adminFetch<UserPermissionsDetail>(`/admin/users/${userId}/permissions`, undefined, token);
+}
+
+export function setUserExtraPermissions(userId: string, permissionIds: string[], token?: string) {
+  return adminFetch<UserPermissionsDetail>(`/admin/users/${userId}/permissions`, {
     method: 'PATCH',
     body: JSON.stringify({ permissionIds }),
   }, token);
@@ -246,6 +308,7 @@ export interface UnitPayload {
 export function adminListActs(
   params?: {
     q?: string;
+    tipo?: string;
     situacao?: string;
     statusPublicacao?: string;
     etapaEditorial?: string;
@@ -253,6 +316,13 @@ export function adminListActs(
     ementa?: string;
     publicadoDe?: string;
     publicadoAte?: string;
+    orgaoOrigemId?: string;
+    numeroDe?: string;
+    numeroAte?: string;
+    meioPublicacaoId?: string;
+    signatarioNome?: string;
+    responsavelEstruturacaoId?: string;
+    responsavelRevisaoId?: string;
     page?: number;
     limit?: number;
   },
@@ -260,6 +330,7 @@ export function adminListActs(
 ) {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
+  if (params?.tipo) qs.set('tipo', params.tipo);
   if (params?.situacao) qs.set('situacao', params.situacao);
   if (params?.statusPublicacao) qs.set('statusPublicacao', params.statusPublicacao);
   if (params?.etapaEditorial) qs.set('etapaEditorial', params.etapaEditorial);
@@ -267,10 +338,86 @@ export function adminListActs(
   if (params?.ementa) qs.set('ementa', params.ementa);
   if (params?.publicadoDe) qs.set('publicadoDe', params.publicadoDe);
   if (params?.publicadoAte) qs.set('publicadoAte', params.publicadoAte);
+  if (params?.orgaoOrigemId) qs.set('orgaoOrigemId', params.orgaoOrigemId);
+  if (params?.numeroDe) qs.set('numeroDe', params.numeroDe);
+  if (params?.numeroAte) qs.set('numeroAte', params.numeroAte);
+  if (params?.meioPublicacaoId) qs.set('meioPublicacaoId', params.meioPublicacaoId);
+  if (params?.signatarioNome) qs.set('signatarioNome', params.signatarioNome);
+  if (params?.responsavelEstruturacaoId) qs.set('responsavelEstruturacaoId', params.responsavelEstruturacaoId);
+  if (params?.responsavelRevisaoId) qs.set('responsavelRevisaoId', params.responsavelRevisaoId);
   if (params?.page) qs.set('page', String(params.page));
   if (params?.limit) qs.set('limit', String(params.limit));
   const q = qs.toString();
   return adminFetch<AdminListResponse>(`/admin/acts${q ? `?${q}` : ''}`, undefined, token);
+}
+
+export interface AdminFilterOptions {
+  orgaos: OriginOrg[];
+  meios: PublicationMedium[];
+  signatarios: string[];
+  users: { id: string; nome: string; email: string; ativo: boolean }[];
+}
+
+export interface BatchUpdateActsPayload {
+  actIds?: string[];
+  selectAllFiltered?: boolean;
+  action:
+    | 'set_responsavel_estruturacao'
+    | 'set_responsavel_revisao'
+    | 'set_meio_publicacao'
+    | 'set_signatario';
+  responsavelEstruturacaoId?: string | null;
+  responsavelRevisaoId?: string | null;
+  meioPublicacaoId?: string | null;
+  signatory?: {
+    signatoryId?: string | null;
+    nome: string;
+    cargo: string;
+    mode: 'append' | 'replace';
+  };
+  tipo?: string;
+  situacao?: string;
+  statusPublicacao?: string;
+  etapaEditorial?: string;
+  norma?: string;
+  ementa?: string;
+  publicadoDe?: string;
+  publicadoAte?: string;
+  orgaoOrigemId?: string;
+  numeroDe?: string;
+  numeroAte?: string;
+  meioPublicacaoIdFilter?: string;
+  signatarioNome?: string;
+  responsavelEstruturacaoIdFilter?: string;
+  responsavelRevisaoIdFilter?: string;
+}
+
+export interface BatchUpdateActsResult {
+  action: string;
+  actionLabel: string;
+  totalSelected: number;
+  processedCount: number;
+  skippedCount: number;
+  processed: { actId: string; codigo: string }[];
+  skipped: { actId: string; codigo: string; reason: string }[];
+  summary: string;
+}
+
+export function batchUpdateActs(payload: BatchUpdateActsPayload, token?: string) {
+  return adminFetch<BatchUpdateActsResult>('/admin/acts/batch', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, token);
+}
+
+export function returnActToStructuring(id: string, token?: string) {
+  return adminFetch<AdminActDetail>(`/admin/acts/${id}/return-to-structuring`, {
+    method: 'POST',
+  }, token);
+}
+
+export function getAdminFilterOptions(token?: string) {
+  return adminFetch<AdminFilterOptions>('/admin/acts/filter-options', undefined, token);
 }
 
 export function createAct(payload: CreateActPayload, token?: string) {
@@ -531,6 +678,7 @@ export interface ConsolidationUnit {
 
 export interface ConsolidationPreview {
   normaAlteradora: { id: string; codigo: string };
+  sourceUnit?: { id: string; identificacao: string | null };
   normaAlterada: { id: string; codigo: string };
   dispositivo: string | null;
   tipoAlteracao: string;
@@ -538,6 +686,58 @@ export interface ConsolidationPreview {
   textoNovo: string | null;
   notaGerada: string;
   data: string;
+}
+
+export interface ConsolidationLink {
+  id: string;
+  origem: 'interna' | 'externa';
+  incomplete: boolean;
+  tipoAlteracao: string;
+  data: string;
+  notaGerada: string | null;
+  fundamento: string | null;
+  normaAlteradora: { id: string; codigo: string; slug: string } | null;
+  normaAlterada: { id: string; codigo: string; slug: string };
+  sourceUnit: { id: string; identificacao: string | null } | null;
+  targetUnit: { id: string; identificacao: string | null } | null;
+  externalSource: {
+    id: string;
+    tipo?: string | null;
+    numero?: string | null;
+    ano?: number | null;
+    emissor: string;
+    descricao: string;
+    url?: string | null;
+    processo?: string | null;
+    tribunal?: string | null;
+  } | null;
+  autor: { id: string; nome: string } | null;
+  createdAt: string;
+}
+
+export interface ExternalEffectPayload {
+  source: {
+    tipo?: string;
+    numero?: string;
+    ano?: number;
+    emissor: string;
+    data?: string;
+    descricao: string;
+    url?: string;
+    arquivoUrl?: string;
+    processo?: string;
+    tribunal?: string;
+  };
+  normaAlteradaActId: string;
+  tipoAlteracao: string;
+  unitId?: string;
+  textoNovo?: string;
+  identificacao?: string;
+  data?: string;
+  fundamento?: string;
+  referenciaUnitId?: string;
+  posicionamento?: string;
+  tipoDispositivoIncluido?: string;
 }
 
 export function listConsolidationActs(token?: string) {
@@ -555,11 +755,39 @@ export function previewConsolidation(payload: Record<string, unknown>, token?: s
   }, token);
 }
 
-export function applyConsolidation(payload: Record<string, unknown>, token?: string) {
-  return adminFetch<ConsolidationPreview & { success?: boolean }>('/admin/consolidation/apply', {
-    method: 'POST',
+export function listConsolidationLinks(
+  params?: {
+    normaAlteradaActId?: string;
+    normaAlteradoraActId?: string;
+    incompleteOnly?: boolean;
+  },
+  token?: string,
+) {
+  const qs = new URLSearchParams();
+  if (params?.normaAlteradaActId) qs.set('normaAlteradaActId', params.normaAlteradaActId);
+  if (params?.normaAlteradoraActId) qs.set('normaAlteradoraActId', params.normaAlteradoraActId);
+  if (params?.incompleteOnly) qs.set('incompleteOnly', 'true');
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return adminFetch<ConsolidationLink[]>(`/admin/consolidation/links${suffix}`, undefined, token);
+}
+
+export function correctConsolidationLink(
+  linkId: string,
+  payload: { sourceUnitId: string; regenerateNote?: boolean },
+  token?: string,
+) {
+  return adminFetch<ConsolidationLink>(`/admin/consolidation/links/${linkId}`, {
+    method: 'PATCH',
     body: JSON.stringify(payload),
   }, token);
+}
+
+export function registerExternalEffect(payload: ExternalEffectPayload, token?: string) {
+  return adminFetch<{ success: boolean; notaGerada: string }>(
+    '/admin/consolidation/external',
+    { method: 'POST', body: JSON.stringify(payload) },
+    token,
+  );
 }
 
 export interface SuggestedImportEffect {
@@ -784,6 +1012,9 @@ export type ArchiveImportItem = {
   erroMensagem: string | null;
   resolucao: string | null;
   actId: string | null;
+  textoIdentificadoImportacao: string | null;
+  textoIdentificadoOrigem: string | null;
+  textoIdentificadoAusente: boolean;
   existingAct: { id: string; codigo: string; slug: string; ementa: string } | null;
   fileUrl: string | null;
 };
@@ -828,6 +1059,7 @@ export function updateArchiveImportItem(
     dataAto?: string | null;
     ementa?: string | null;
     resolucao?: 'ignore' | 'link' | 'create' | null;
+    textoIdentificadoImportacao?: string | null;
   },
 ) {
   return adminFetch<ArchiveImportBatch>(`/admin/archive-imports/${batchId}/items/${itemId}`, {
@@ -860,8 +1092,59 @@ export async function getArchiveImportItemFileUrl(
   return URL.createObjectURL(blob);
 }
 
+export async function getArchiveImportItemPreviewHtml(
+  batchId: string,
+  itemId: string,
+): Promise<string> {
+  const API_URL = getApiBaseUrl();
+  const res = await authorizedFetch(
+    `${API_URL}/admin/archive-imports/${batchId}/items/${itemId}/preview`,
+  );
+  if (!res.ok) throw new Error('Não foi possível gerar preview do documento');
+  return res.text();
+}
+
+export function updateActIdentifiedImportText(actId: string, textoIdentificadoImportacao: string) {
+  return adminFetch<AdminActDetail>(`/admin/acts/${actId}/identified-import-text`, {
+    method: 'PATCH',
+    body: JSON.stringify({ textoIdentificadoImportacao }),
+  });
+}
+
+export function identifyActTextFromOriginal(actId: string) {
+  return adminFetch<AdminActDetail>(`/admin/acts/${actId}/identify-text-from-original`, {
+    method: 'POST',
+  });
+}
+
 export function startActStructuring(id: string, token?: string) {
   return adminFetch<ActDetail>(`/admin/acts/${id}/start-structuring`, { method: 'POST' }, token);
+}
+
+export type StructureFromOriginalResult = {
+  act: ActDetail;
+  elementCount: number;
+  replaced: boolean;
+  usedOcr: boolean;
+  ocrNote?: string;
+  ementaPreserved?: boolean;
+  ementaNote?: string;
+  arquivo: string;
+};
+
+export function structureActFromOriginal(
+  id: string,
+  body?: { confirmReplace?: boolean },
+  token?: string,
+) {
+  return adminFetch<StructureFromOriginalResult>(
+    `/admin/acts/${id}/structure-from-original`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    },
+    token,
+  );
 }
 
 /** Baixa backup completo (banco + uploads) — apenas admin_geral. */

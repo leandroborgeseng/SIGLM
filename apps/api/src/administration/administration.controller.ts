@@ -1,7 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
 import { RequirePermissions } from '../auth/auth.constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthUser } from '../auth/auth.constants';
 import { AdministrationService } from './administration.service';
 
 @Controller('admin')
@@ -90,19 +93,43 @@ export class AdministrationController {
   @Post('users')
   @RequirePermissions('users:manage')
   createUser(
-    @Body() body: { nome: string; email: string; senha: string; roleId: string },
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      nome: string;
+      email: string;
+      senha: string;
+      roleIds: string[];
+      primaryRoleId?: string;
+      orgaoIds?: string[];
+      primaryOrgaoId?: string;
+      mustChangePassword?: boolean;
+    },
+    @Req() req: Request,
   ) {
-    return this.admin.createUser(body);
+    return this.admin.createUser(body, user.id, req.ip);
   }
 
   @Patch('users/:id')
   @RequirePermissions('users:manage')
   updateUser(
+    @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body()
-    body: { nome?: string; email?: string; senha?: string; roleId?: string; ativo?: boolean },
+    body: {
+      nome?: string;
+      email?: string;
+      senha?: string;
+      roleIds?: string[];
+      primaryRoleId?: string;
+      orgaoIds?: string[];
+      primaryOrgaoId?: string | null;
+      ativo?: boolean;
+      mustChangePassword?: boolean;
+    },
+    @Req() req: Request,
   ) {
-    return this.admin.updateUser(id, body);
+    return this.admin.updateUser(id, body, user.id, req.ip);
   }
 
   // ─── Permissões ────────────────────────────────────────────────────────────
@@ -121,7 +148,29 @@ export class AdministrationController {
 
   @Patch('roles/:id/permissions')
   @RequirePermissions('users:manage')
-  setRolePermissions(@Param('id') id: string, @Body() body: { permissionIds: string[] }) {
-    return this.admin.setRolePermissions(id, body.permissionIds ?? []);
+  setRolePermissions(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { permissionIds: string[] },
+    @Req() req: Request,
+  ) {
+    return this.admin.setRolePermissions(id, body.permissionIds ?? [], user.id, req.ip);
+  }
+
+  @Get('users/:id/permissions')
+  @RequirePermissions('users:manage')
+  getUserPermissions(@Param('id') id: string) {
+    return this.admin.getUserPermissions(id);
+  }
+
+  @Patch('users/:id/permissions')
+  @RequirePermissions('users:manage')
+  setUserExtraPermissions(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { permissionIds: string[] },
+    @Req() req: Request,
+  ) {
+    return this.admin.setUserExtraPermissions(id, body.permissionIds ?? [], user.id, req.ip);
   }
 }

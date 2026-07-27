@@ -139,7 +139,7 @@ export function AddUnitDialog({
         tipoUnidade: tipo,
         identificacao: isEmenta ? 'Ementa' : isPreambulo ? 'Preâmbulo' : undefined,
         texto: titulo.trim() || ' ',
-        parentUnitId: null,
+        parentUnitId: isEmenta ? null : parentUnitId || null,
         afterUnitId,
         formatacao: isSimple ? formatacao : null,
       });
@@ -221,16 +221,16 @@ export function AddUnitDialog({
             )}
           </div>
 
-          {!isTextGroup && (
+          {!isEmenta && (
             <div>
               <label className="mb-1 block text-[12px] text-ink-3">
-                Vincular a (sugerido — editável)
+                Vincular a (pai)
               </label>
               <Select
                 value={parentUnitId}
                 onChange={(e) => setParentUnitId(e.target.value)}
               >
-                <option value="">Nenhum (nível superior)</option>
+                <option value="">Nenhum — nível superior</option>
                 {parentOptions.recommended.length > 0 && (
                   <optgroup label="Recomendados">
                     {parentOptions.recommended.map((p) => (

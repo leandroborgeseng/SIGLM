@@ -26,7 +26,6 @@ import {
   restoreSystemBackup,
   runS3BackupNow,
   saveS3BackupConfig,
-  setRolePermissions,
   updateOrgan,
   updatePublicationMedium,
   updateSignatory,
@@ -39,6 +38,9 @@ import {
   type S3BackupStatus,
 } from '@/lib/admin-api';
 import { cn } from '@/lib/format';
+import { PasswordField } from '@/components/admin/PasswordField';
+import { PermissionsTab } from '@/components/admin/PermissionsTab';
+import { passwordPolicyMessage } from '@/lib/password-policy';
 
 type Tab = 'usuarios' | 'orgaos' | 'meios' | 'signatarios' | 'permissoes' | 'backup';
 
@@ -128,7 +130,7 @@ export function AdministrationPanel() {
         ) : loading ? (
           <p className="text-[14px] text-ink-3">Carregando…</p>
         ) : tab === 'usuarios' ? (
-          <UsersTab users={users} roles={roles} onChanged={reload} />
+          <UsersTab users={users} roles={roles} organs={organs} onChanged={reload} />
         ) : tab === 'orgaos' ? (
           <OrgansTab organs={organs} onChanged={reload} />
         ) : tab === 'meios' ? (
@@ -136,7 +138,12 @@ export function AdministrationPanel() {
         ) : tab === 'signatarios' ? (
           <SignatoriesTab signatories={signatories} organs={organs} onChanged={reload} />
         ) : (
-          <PermissionsTab roles={roles} permissions={permissions} onChanged={reload} />
+          <PermissionsTab
+            roles={roles}
+            users={users}
+            permissions={permissions}
+            onChanged={reload}
+          />
         )}
       </div>
     </div>
@@ -793,24 +800,212 @@ function BackupTab() {
   );
 }
 
+function MultiLinkSelector({
+  label,
+  options,
+  selectedIds,
+  primaryId,
+  onChange,
+}: {
+  label: string;
+  options: { id: string; label: string }[];
+  selectedIds: string[];
+  primaryId: string | null;
+  onChange: (ids: string[], primaryId: string | null) => void;
+}) {
+  const toggle = (id: string) => {
+    const next = selectedIds.includes(id)
+      ? selectedIds.filter((x) => x !== id)
+      : [...selectedIds, id];
+    let nextPrimary = primaryId;
+    if (!next.includes(id)) {
+      if (primaryId === id) nextPrimary = next[0] ?? null;
+    } else if (next.length === 1) {
+      nextPrimary = next[0];
+    } else if (!nextPrimary || !next.includes(nextPrimary)) {
+      nextPrimary = next[0];
+    }
+    onChange(next, nextPrimary);
+  };
+
+  const setPrimary = (id: string) => {
+    if (!selectedIds.includes(id)) return;
+    onChange(selectedIds, id);
+  };
+
+  return (
+    <div className="sm:col-span-2">
+      <p className="mb-2 text-[12px] font-semibold text-ink-2">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((opt) => {
+          const checked = selectedIds.includes(opt.id);
+          const isPrimary = primaryId === opt.id;
+          return (
+            <label
+              key={opt.id}
+              className={cn(
+                'flex cursor-pointer items-center gap-2 rounded-[8px] border px-2.5 py-1.5 text-[12px]',
+                checked ? 'border-brand/40 bg-brand-soft/40' : 'border-line bg-surface',
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(opt.id)}
+                className="rounded border-line"
+              />
+              <span>{opt.label}</span>
+              {checked && selectedIds.length > 1 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setPrimary(opt.id);
+                  }}
+                  className={cn(
+                    'ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                    isPrimary ? 'bg-brand text-white' : 'bg-canvas text-ink-4 hover:text-brand',
+                  )}
+                >
+                  {isPrimary ? 'Principal' : 'Tornar principal'}
+                </button>
+              )}
+              {checked && selectedIds.length === 1 && (
+                <span className="ml-1 text-[10px] font-semibold uppercase text-brand">Principal</span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function UsersTab({
   users,
   roles,
+  organs,
   onChanged,
 }: {
   users: AdminUser[];
   roles: AdminRole[];
+  organs: OriginOrg[];
   onChanged: () => Promise<void>;
 }) {
   const { toast } = useToast();
-  const [form, setForm] = useState({ nome: '', email: '', senha: '', roleId: roles[0]?.id ?? '' });
+  const [form, setForm] = useState<{
+    nome: string;
+    email: string;
+    senha: string;
+    roleIds: string[];
+    primaryRoleId: string | null;
+    orgaoIds: string[];
+    primaryOrgaoId: string | null;
+    mustChangePassword: boolean;
+  }>({
+    nome: '',
+    email: '',
+    senha: '',
+    roleIds: roles[0]?.id ? [roles[0].id] : [],
+    primaryRoleId: roles[0]?.id ?? null,
+    orgaoIds: [],
+    primaryOrgaoId: null,
+    mustChangePassword: true,
+  });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editSenha, setEditSenha] = useState('');
+  const [editMustChange, setEditMustChange] = useState(false);
+  const [editRoleIds, setEditRoleIds] = useState<string[]>([]);
+  const [editPrimaryRoleId, setEditPrimaryRoleId] = useState<string | null>(null);
+  const [editOrgaoIds, setEditOrgaoIds] = useState<string[]>([]);
+  const [editPrimaryOrgaoId, setEditPrimaryOrgaoId] = useState<string | null>(null);
+
+  const roleOptions = roles.map((r) => ({ id: r.id, label: r.nome.replace(/_/g, ' ') }));
+  const organOptions = organs.filter((o) => o.ativo).map((o) => ({
+    id: o.id,
+    label: o.sigla ? `${o.sigla} — ${o.nome}` : o.nome,
+  }));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.roleIds.length) {
+      toast('Selecione ao menos um perfil', 'danger');
+      return;
+    }
+    const policyError = passwordPolicyMessage(form.senha);
+    if (policyError) {
+      toast(policyError, 'danger');
+      return;
+    }
     try {
-      await createUser(form);
+      await createUser({
+        nome: form.nome,
+        email: form.email,
+        senha: form.senha,
+        roleIds: form.roleIds,
+        primaryRoleId: form.primaryRoleId ?? undefined,
+        orgaoIds: form.orgaoIds.length ? form.orgaoIds : undefined,
+        primaryOrgaoId: form.primaryOrgaoId ?? undefined,
+        mustChangePassword: form.mustChangePassword,
+      });
       toast('Usuário criado', 'ok');
-      setForm({ nome: '', email: '', senha: '', roleId: roles[0]?.id ?? '' });
+      setForm({
+        nome: '',
+        email: '',
+        senha: '',
+        roleIds: roles[0]?.id ? [roles[0].id] : [],
+        primaryRoleId: roles[0]?.id ?? null,
+        orgaoIds: [],
+        primaryOrgaoId: null,
+        mustChangePassword: true,
+      });
+      await onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erro', 'danger');
+    }
+  };
+
+  const openEdit = (user: AdminUser) => {
+    const roleIds = user.roleLinks?.length
+      ? user.roleLinks.map((l) => l.roleId)
+      : [user.role.id];
+    const primaryRoleId =
+      user.roleLinks?.find((l) => l.isPrimary)?.roleId ?? user.role.id;
+    const orgaoIds = user.orgLinks?.map((l) => l.orgaoId) ?? [];
+    const primaryOrgaoId = user.orgLinks?.find((l) => l.isPrimary)?.orgaoId ?? null;
+    setEditingId(user.id);
+    setEditSenha('');
+    setEditMustChange(user.mustChangePassword);
+    setEditRoleIds(roleIds);
+    setEditPrimaryRoleId(primaryRoleId);
+    setEditOrgaoIds(orgaoIds);
+    setEditPrimaryOrgaoId(primaryOrgaoId);
+  };
+
+  const saveUserEdit = async (user: AdminUser) => {
+    if (user.ativo && !editRoleIds.length) {
+      toast('Usuário ativo deve ter ao menos um perfil', 'danger');
+      return;
+    }
+    if (editSenha) {
+      const policyError = passwordPolicyMessage(editSenha);
+      if (policyError) {
+        toast(policyError, 'danger');
+        return;
+      }
+    }
+    try {
+      await updateUser(user.id, {
+        senha: editSenha || undefined,
+        mustChangePassword: editMustChange,
+        roleIds: editRoleIds,
+        primaryRoleId: editPrimaryRoleId ?? undefined,
+        orgaoIds: editOrgaoIds,
+        primaryOrgaoId: editPrimaryOrgaoId,
+      });
+      toast('Usuário atualizado', 'ok');
+      setEditingId(null);
+      setEditSenha('');
       await onChanged();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Erro', 'danger');
@@ -835,25 +1030,44 @@ function UsersTab({
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
-          <Input
-            type="password"
-            placeholder="Senha"
-            required
-            minLength={6}
-            value={form.senha}
-            onChange={(e) => setForm({ ...form, senha: e.target.value })}
+          <div className="sm:col-span-2">
+            <PasswordField
+              id="create-user-senha"
+              label="Senha"
+              value={form.senha}
+              onChange={(senha) => setForm({ ...form, senha })}
+              required
+              autoComplete="new-password"
+              showRequirements
+            />
+          </div>
+          <MultiLinkSelector
+            label="Perfis vinculados"
+            options={roleOptions}
+            selectedIds={form.roleIds}
+            primaryId={form.primaryRoleId}
+            onChange={(roleIds, primaryRoleId) =>
+              setForm({ ...form, roleIds, primaryRoleId })
+            }
           />
-          <Select
-            value={form.roleId}
-            onChange={(e) => setForm({ ...form, roleId: e.target.value })}
-            required
-          >
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.nome}
-              </option>
-            ))}
-          </Select>
+          <MultiLinkSelector
+            label="Órgãos vinculados (opcional)"
+            options={organOptions}
+            selectedIds={form.orgaoIds}
+            primaryId={form.primaryOrgaoId}
+            onChange={(orgaoIds, primaryOrgaoId) =>
+              setForm({ ...form, orgaoIds, primaryOrgaoId })
+            }
+          />
+          <label className="flex items-center gap-2 text-[13px] text-ink-2 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.mustChangePassword}
+              onChange={(e) => setForm({ ...form, mustChangePassword: e.target.checked })}
+              className="rounded border-line"
+            />
+            Exigir alteração de senha no primeiro acesso
+          </label>
         </div>
         <div className="mt-3 flex justify-end">
           <Button type="submit" size="sm">
@@ -864,48 +1078,115 @@ function UsersTab({
 
       <ul className="divide-y divide-line rounded-[14px] border border-line bg-surface shadow-sm">
         {users.map((u) => (
-          <li key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div>
-              <p className="text-[14px] font-semibold text-ink">{u.nome}</p>
-              <p className="text-[12px] text-ink-3">{u.email}</p>
+          <li key={u.id} className="px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[14px] font-semibold text-ink">{u.nome}</p>
+                <p className="text-[12px] text-ink-3">{u.email}</p>
+                <p className="mt-1 text-[11px] text-ink-3">
+                  Perfil: <span className="font-medium text-ink-2">{u.role.nome.replace(/_/g, ' ')}</span>
+                  {u.rolesCount > 1 && (
+                    <span className="text-ink-4"> (+{u.rolesCount - 1})</span>
+                  )}
+                  {' · '}
+                  Órgão:{' '}
+                  <span className="font-medium text-ink-2">
+                    {u.primaryOrg?.sigla ?? u.primaryOrg?.nome ?? '—'}
+                  </span>
+                  {u.orgsCount > 1 && (
+                    <span className="text-ink-4"> (+{u.orgsCount - 1})</span>
+                  )}
+                </p>
+                {u.mustChangePassword && (
+                  <p className="mt-1 text-[11px] font-medium text-warn">
+                    Deve alterar senha no próximo acesso
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={u.ativo ? 'ok' : 'danger'}>{u.ativo ? 'Ativo' : 'Inativo'}</Badge>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    if (editingId === u.id) {
+                      setEditingId(null);
+                      setEditSenha('');
+                      return;
+                    }
+                    openEdit(u);
+                  }}
+                >
+                  {editingId === u.id ? 'Fechar' : 'Editar'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={async () => {
+                    try {
+                      await updateUser(u.id, { ativo: !u.ativo });
+                      toast(u.ativo ? 'Usuário inativado' : 'Usuário reativado', 'ok');
+                      await onChanged();
+                    } catch (err) {
+                      toast(err instanceof Error ? err.message : 'Erro', 'danger');
+                    }
+                  }}
+                >
+                  {u.ativo ? 'Inativar' : 'Reativar'}
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Select
-                value={u.role.id}
-                className="w-auto text-[12px]"
-                onChange={async (e) => {
-                  try {
-                    await updateUser(u.id, { roleId: e.target.value });
-                    toast('Perfil atualizado', 'ok');
-                    await onChanged();
-                  } catch (err) {
-                    toast(err instanceof Error ? err.message : 'Erro', 'danger');
-                  }
-                }}
-              >
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.nome}
-                  </option>
-                ))}
-              </Select>
-              <Badge variant={u.ativo ? 'ok' : 'danger'}>{u.ativo ? 'Ativo' : 'Inativo'}</Badge>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  try {
-                    await updateUser(u.id, { ativo: !u.ativo });
-                    toast(u.ativo ? 'Usuário inativado' : 'Usuário reativado', 'ok');
-                    await onChanged();
-                  } catch (err) {
-                    toast(err instanceof Error ? err.message : 'Erro', 'danger');
-                  }
-                }}
-              >
-                {u.ativo ? 'Inativar' : 'Reativar'}
-              </Button>
-            </div>
+
+            {editingId === u.id && (
+              <div className="mt-3 rounded-[10px] border border-line bg-canvas p-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <MultiLinkSelector
+                    label="Perfis vinculados"
+                    options={roleOptions}
+                    selectedIds={editRoleIds}
+                    primaryId={editPrimaryRoleId}
+                    onChange={(roleIds, primaryRoleId) => {
+                      setEditRoleIds(roleIds);
+                      setEditPrimaryRoleId(primaryRoleId);
+                    }}
+                  />
+                  <MultiLinkSelector
+                    label="Órgãos vinculados"
+                    options={organOptions}
+                    selectedIds={editOrgaoIds}
+                    primaryId={editPrimaryOrgaoId}
+                    onChange={(orgaoIds, primaryOrgaoId) => {
+                      setEditOrgaoIds(orgaoIds);
+                      setEditPrimaryOrgaoId(primaryOrgaoId);
+                    }}
+                  />
+                  <div className="sm:col-span-2">
+                    <PasswordField
+                      id={`edit-senha-${u.id}`}
+                      label="Nova senha (deixe vazio para não alterar)"
+                      value={editSenha}
+                      onChange={setEditSenha}
+                      autoComplete="new-password"
+                      showRequirements={editSenha.length > 0}
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-[13px] text-ink-2 sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={editMustChange}
+                      onChange={(e) => setEditMustChange(e.target.checked)}
+                      className="rounded border-line"
+                    />
+                    Exigir alteração de senha no primeiro acesso
+                  </label>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <Button size="sm" onClick={() => void saveUserEdit(u)}>
+                    Salvar alterações
+                  </Button>
+                </div>
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -1361,89 +1642,6 @@ function SignatoriesTab({
         Alterações no cadastro geral não modificam automaticamente os snapshots já vinculados a
         atos publicados.
       </p>
-    </div>
-  );
-}
-
-function PermissionsTab({
-  roles,
-  permissions,
-  onChanged,
-}: {
-  roles: AdminRole[];
-  permissions: { id: string; chave: string }[];
-  onChanged: () => Promise<void>;
-}) {
-  const { toast } = useToast();
-  const [selectedRoleId, setSelectedRoleId] = useState(roles[0]?.id ?? '');
-  const role = roles.find((r) => r.id === selectedRoleId) ?? roles[0];
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(role?.permissions.map((p) => p.permission.id) ?? []),
-  );
-
-  useEffect(() => {
-    const r = roles.find((x) => x.id === selectedRoleId);
-    setSelected(new Set(r?.permissions.map((p) => p.permission.id) ?? []));
-  }, [roles, selectedRoleId]);
-
-  if (!role) return <p className="text-ink-3">Nenhum perfil cadastrado.</p>;
-
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-[200px] flex-1">
-          <label className="mb-1 block text-[12px] text-ink-3">Perfil</label>
-          <Select value={selectedRoleId} onChange={(e) => setSelectedRoleId(e.target.value)}>
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.nome} ({r._count?.users ?? 0} usuários)
-              </option>
-            ))}
-          </Select>
-        </div>
-        <Button
-          size="sm"
-          onClick={async () => {
-            try {
-              await setRolePermissions(role.id, [...selected]);
-              toast('Permissões salvas', 'ok');
-              await onChanged();
-            } catch (err) {
-              toast(err instanceof Error ? err.message : 'Erro', 'danger');
-            }
-          }}
-        >
-          Salvar permissões
-        </Button>
-      </div>
-
-      <p className="text-[13px] text-ink-3">{role.descricao}</p>
-
-      <ul className="divide-y divide-line rounded-[14px] border border-line bg-surface shadow-sm">
-        {permissions.map((p) => (
-          <li key={p.id} className="flex items-center gap-3 px-4 py-3">
-            <input
-              type="checkbox"
-              id={`perm-${p.id}`}
-              checked={selected.has(p.id)}
-              onChange={() => toggle(p.id)}
-              className="h-4 w-4"
-            />
-            <label htmlFor={`perm-${p.id}`} className="font-mono text-[13px] text-ink">
-              {p.chave}
-            </label>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

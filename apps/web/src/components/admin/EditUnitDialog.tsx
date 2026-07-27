@@ -113,7 +113,7 @@ export function EditUnitDialog({
       return;
     }
 
-    const nextParent = isTextGroup ? null : parentUnitId || null;
+    const nextParent = isEmenta ? null : parentUnitId || null;
     const nextTexto = isDivision || isTextGroup ? titulo : unit.texto;
     const nextIdent = isSimple
       ? null
@@ -210,11 +210,11 @@ export function EditUnitDialog({
             </Select>
           </div>
 
-          {!isTextGroup && (
+          {!isEmenta && (
             <div>
-              <label className="mb-1 block text-[12px] text-ink-3">Vincular a</label>
+              <label className="mb-1 block text-[12px] text-ink-3">Vincular a (pai)</label>
               <Select value={parentUnitId} onChange={(e) => setParentUnitId(e.target.value)}>
-                <option value="">Nenhum (nível superior)</option>
+                <option value="">Nenhum — nível superior</option>
                 {parentOptions.recommended.length > 0 && (
                   <optgroup label="Recomendados">
                     {parentOptions.recommended.map((p) => (
@@ -236,6 +236,12 @@ export function EditUnitDialog({
                   </optgroup>
                 )}
               </Select>
+              {isPreambulo && (
+                <p className="mt-1 text-[12px] text-ink-3">
+                  O Preâmbulo normalmente fica em nível superior; vínculos atípicos são permitidos
+                  para atos históricos.
+                </p>
+              )}
               {nonstandard && (
                 <p className="mt-1 text-[12px] text-warn">
                   Este vínculo foge do padrão legislativo usual, mas será preservado.

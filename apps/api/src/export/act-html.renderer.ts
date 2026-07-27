@@ -177,17 +177,15 @@ export function buildPublicationDisclaimer(act: {
 }
 
 export function renderConsolidatedHtml(act: ExportAct): string {
-  const codigo = formatActCode(act.tipo, act.numero, act.ano);
   const orgs = act.orgaosOrigem?.length
     ? act.orgaosOrigem
     : act.orgaoOrigem
       ? [{ nome: act.orgaoOrigem, sigla: null }]
       : [];
   const prefixo = resolveTituloPrefixo(act.prefixoTituloModo, act.prefixoTitulo, orgs);
-  const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto, {
-    atoConjunto: act.atoConjunto,
-    prefixo,
-  });
+  const codeOpts = { atoConjunto: act.atoConjunto, prefixo };
+  const codigo = formatActCode(act.tipo, act.numero, act.ano, codeOpts);
+  const tituloFormal = formatFormalTitle(act.tipo, act.numero, act.ano, act.dataAto, codeOpts);
   const situacao = SITUACAO_LABELS[act.situacao] ?? act.situacao;
   const sorted = sortUnitsForDisplay(act.units);
   const hasEmentaUnit = sorted.some((u) => u.tipoUnidade === 'ementa');
@@ -221,7 +219,7 @@ export function renderConsolidatedHtml(act: ExportAct): string {
     .brand-lockup .orgao { font-family: system-ui, sans-serif; font-size: 13px; font-weight: 500; color: var(--ink-2); margin: .15rem 0 0; }
     .header { max-width: 900px; margin: 0 auto 1.75rem; }
     .titulo-formal { text-align: center; font-size: 16px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; margin: 0 0 1rem; }
-    .ementa { text-align: left; font-size: 14px; font-weight: 400; line-height: 1.55; margin: 0 0 1.25rem; max-width: 50%; margin-left: auto; }
+    .ementa { text-align: justify; font-size: 14px; font-weight: 400; line-height: 1.55; margin: 0 0 1.25rem; max-width: 50%; margin-left: auto; }
     /* Quebras canônicas via <br> (sanitizeUnitHtml) — sem pre-wrap para não duplicar. */
     .meta-line { font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink-3); text-align: center; margin: 0 0 1.5rem; }
     .content { max-width: 900px; margin: 0 auto; }

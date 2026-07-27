@@ -17,8 +17,38 @@ export const SITUACAO_LABELS: Record<ActSituacao, string> = {
   consolidado: 'Consolidado',
 };
 
-export function formatActCode(tipo: ActType, numero: number, ano: number): string {
-  return `${ACT_TYPE_LABELS[tipo]} nº ${numero.toLocaleString('pt-BR')}/${ano}`;
+export type ActCodeOptions = {
+  atoConjunto?: boolean;
+  /** Prefixo já resolvido (manual ou auto com siglas). */
+  prefixo?: string | null;
+};
+
+const FEMININE_ACT_TYPES: ReadonlySet<ActType> = new Set([
+  ActType.lei,
+  ActType.lei_complementar,
+  ActType.resolucao,
+  ActType.portaria,
+  ActType.instrucao_normativa,
+]);
+
+/** "Conjunta" / "Conjunto" conforme o gênero do tipo do ato. */
+export function conjuntoSuffix(tipo: ActType, atoConjunto?: boolean, upper = false): string {
+  if (!atoConjunto) return '';
+  const word = FEMININE_ACT_TYPES.has(tipo) ? 'Conjunta' : 'Conjunto';
+  return upper ? ` ${word.toUpperCase()}` : ` ${word}`;
+}
+
+/** Título resumido: "{Tipo}[ Conjunt{a|o}][ {PREFIXO}] nº {n}/{ano}". */
+export function formatActCode(
+  tipo: ActType,
+  numero: number,
+  ano: number,
+  options?: ActCodeOptions,
+): string {
+  const typeLabel = ACT_TYPE_LABELS[tipo];
+  const conjunto = conjuntoSuffix(tipo, options?.atoConjunto);
+  const prefixo = options?.prefixo?.trim() ? ` ${options.prefixo.trim()}` : '';
+  return `${typeLabel}${conjunto}${prefixo} nº ${numero.toLocaleString('pt-BR')}/${ano}`;
 }
 
 const MONTHS_PT = [
@@ -42,7 +72,7 @@ export type FormalTitleOptions = {
   prefixo?: string | null;
 };
 
-/** Título formal: "{TIPO}[ CONJUNTA][ {PREFIXO}] Nº {n}, DE {data}". */
+/** Título formal: "{TIPO}[ CONJUNT{A|O}][ {PREFIXO}] Nº {n}, DE {data}". */
 export function formatFormalTitle(
   tipo: ActType,
   numero: number,
@@ -52,7 +82,7 @@ export function formatFormalTitle(
 ): string {
   const typeLabel = ACT_TYPE_LABELS[tipo].toUpperCase();
   const num = numero.toLocaleString('pt-BR');
-  const conjunto = options?.atoConjunto ? ' CONJUNTA' : '';
+  const conjunto = conjuntoSuffix(tipo, options?.atoConjunto, true);
   const prefixo = options?.prefixo?.trim() ? ` ${options.prefixo.trim().toUpperCase()}` : '';
   const head = `${typeLabel}${conjunto}${prefixo}`;
 

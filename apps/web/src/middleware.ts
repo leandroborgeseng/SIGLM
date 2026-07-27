@@ -69,7 +69,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (!pathname.startsWith('/admin') || pathname.startsWith('/admin/login')) {
+  if (!pathname.startsWith('/admin') || pathname.startsWith('/admin/login') || pathname.startsWith('/admin/alterar-senha')) {
     return NextResponse.next();
   }
 

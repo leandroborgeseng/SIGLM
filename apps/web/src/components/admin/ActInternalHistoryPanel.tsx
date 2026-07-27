@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { AdminTopbar } from '@/components/admin/AdminShell';
 import { Badge } from '@/components/ui/Badge';
@@ -14,12 +14,17 @@ import {
   listActInternalHistory,
   type ActHistoryEntry,
 } from '@/lib/admin-api';
+import { cn } from '@/lib/format';
 
 const ACAO_LABELS: Record<string, string> = {
   criar_ato: 'Criação',
   importacao: 'Importação',
+  iniciar_estruturacao: 'Iniciar estruturação',
+  auto_estruturacao: 'Estruturação automática',
   criar_versao: 'Criar versão',
   editar_metadados: 'Metadados',
+  alterar_responsaveis: 'Responsáveis',
+  devolver_estruturacao: 'Devolver estruturação',
   salvar_unidades: 'Salvar estrutura',
   incluir_elemento: 'Incluir elemento',
   excluir_elemento: 'Excluir elemento',
@@ -63,6 +68,145 @@ type DiffResult = {
   };
 };
 
+function EntryDetails({
+  selected,
+  diff,
+  snapshot,
+}: {
+  selected: ActHistoryEntry | null;
+  diff: DiffResult | null;
+  snapshot: { metadata?: Record<string, unknown>; units?: SnapshotUnit[] } | null | undefined;
+}) {
+  if (diff) {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-[14px] font-semibold">Diferenças</h3>
+        <p className="text-[12px] text-ink-3">
+          {new Date(diff.left.createdAt).toLocaleString('pt-BR')} →{' '}
+          {new Date(diff.right.createdAt).toLocaleString('pt-BR')}
+        </p>
+        {diff.diff.metaChanges.length > 0 && (
+          <div>
+            <h4 className="mb-2 text-[13px] font-semibold">Metadados</h4>
+            <ul className="space-y-1 text-[12.5px]">
+              {diff.diff.metaChanges.map((c) => (
+                <li key={c.campo} className="rounded border border-line-2 px-2 py-1">
+                  <strong>{c.campo}</strong>: {JSON.stringify(c.de)} → {JSON.stringify(c.para)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {diff.diff.units.orderChanged && (
+          <p className="text-[13px] text-warn">Ordem dos elementos alterada.</p>
+        )}
+        {diff.diff.units.added.length > 0 && (
+          <div>
+            <h4 className="mb-2 text-[13px] font-semibold text-ok">Incluídos</h4>
+            <ul className="space-y-1 text-[12.5px]">
+              {diff.diff.units.added.map((u) => (
+                <li key={u.id}>{u.identificacao ?? u.tipoUnidade}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {diff.diff.units.removed.length > 0 && (
+          <div>
+            <h4 className="mb-2 text-[13px] font-semibold text-danger">Removidos</h4>
+            <ul className="space-y-1 text-[12.5px]">
+              {diff.diff.units.removed.map((u) => (
+                <li key={u.id}>{u.identificacao ?? u.tipoUnidade}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {diff.diff.units.changed.length > 0 && (
+          <div>
+            <h4 className="mb-2 text-[13px] font-semibold">Alterados</h4>
+            <ul className="space-y-2 text-[12.5px]">
+              {diff.diff.units.changed.map((u) => (
+                <li key={u.id} className="rounded border border-line-2 p-2">
+                  <p className="font-semibold">
+                    {u.identificacao ?? u.id} ({u.fields.join(', ')})
+                  </p>
+                  {u.fields.includes('texto') && (
+                    <div className="mt-1 grid gap-2 md:grid-cols-2">
+                      <pre className="whitespace-pre-wrap rounded bg-surface-2 p-2 text-[11px]">
+                        {u.de.texto}
+                      </pre>
+                      <pre className="whitespace-pre-wrap rounded bg-brand/5 p-2 text-[11px]">
+                        {u.para.texto}
+                      </pre>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {!diff.diff.metaChanges.length &&
+          !diff.diff.units.added.length &&
+          !diff.diff.units.removed.length &&
+          !diff.diff.units.changed.length &&
+          !diff.diff.units.orderChanged && (
+            <p className="text-[13px] text-ink-3">Nenhuma diferença detectada.</p>
+          )}
+      </div>
+    );
+  }
+
+  if (selected && snapshot) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-[14px] font-semibold">
+            {ACAO_LABELS[selected.acao] ?? selected.acao}
+          </h3>
+          <p className="text-[12px] text-ink-3">
+            {new Date(selected.createdAt).toLocaleString('pt-BR')}
+            {selected.user ? ` · ${selected.user.nome}` : ''}
+          </p>
+          <p className="mt-1 text-[13px]">{selected.resumo}</p>
+        </div>
+        {snapshot.metadata && (
+          <div>
+            <h4 className="mb-2 text-[13px] font-semibold">Metadados na fotografia</h4>
+            <dl className="grid gap-1 text-[12.5px] sm:grid-cols-2">
+              {Object.entries(snapshot.metadata).map(([k, v]) => (
+                <div key={k} className="rounded border border-line-2 px-2 py-1">
+                  <dt className="text-[10px] uppercase text-ink-4">{k}</dt>
+                  <dd>{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+        <div>
+          <h4 className="mb-2 text-[13px] font-semibold">
+            Texto estruturado ({snapshot.units?.length ?? 0} elementos)
+          </h4>
+          <ul className="space-y-2">
+            {(snapshot.units ?? []).map((u) => (
+              <li key={u.id} className="rounded border border-line-2 p-2 text-[12.5px]">
+                <p className="font-mono text-[11px] font-semibold text-brand">
+                  {u.identificacao ?? u.tipoUnidade}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-ink-2">{u.texto}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <p className="text-[13px] text-ink-3">
+      Selecione um registro na linha do tempo ou compare duas fotografias.
+    </p>
+  );
+}
+
 export function ActInternalHistoryPanel({
   actId,
   actLabel,
@@ -78,6 +222,9 @@ export function ActInternalHistoryPanel({
   const [rightId, setRightId] = useState('');
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [comparing, setComparing] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
+  const timelineScrollTop = useRef(0);
 
   useEffect(() => {
     listActInternalHistory(actId)
@@ -87,13 +234,28 @@ export function ActInternalHistoryPanel({
   }, [actId, toast]);
 
   const openEntry = async (id: string) => {
+    if (timelineScrollRef.current) {
+      timelineScrollTop.current = timelineScrollRef.current.scrollTop;
+    }
     try {
       const entry = await getActHistoryEntry(actId, id);
       setSelected(entry);
       setDiff(null);
+      if (window.matchMedia('(max-width: 1023px)').matches) {
+        setMobileDetailOpen(true);
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro ao abrir registro', 'danger');
     }
+  };
+
+  const closeMobileDetail = () => {
+    setMobileDetailOpen(false);
+    requestAnimationFrame(() => {
+      if (timelineScrollRef.current) {
+        timelineScrollRef.current.scrollTop = timelineScrollTop.current;
+      }
+    });
   };
 
   const runCompare = async () => {
@@ -106,6 +268,9 @@ export function ActInternalHistoryPanel({
       const result = await compareActHistory(actId, leftId, rightId);
       setDiff(result as DiffResult);
       setSelected(null);
+      if (window.matchMedia('(max-width: 1023px)').matches) {
+        setMobileDetailOpen(true);
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Erro na comparação', 'danger');
     } finally {
@@ -119,9 +284,10 @@ export function ActInternalHistoryPanel({
     | undefined;
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <AdminTopbar
         title="Histórico interno"
+        sticky
         actions={
           <Link href={`/admin/atos/${actId}/editor`}>
             <Button variant="ghost" size="sm">
@@ -132,8 +298,8 @@ export function ActInternalHistoryPanel({
         }
       />
 
-      <div className="space-y-6 p-6">
-        <div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 sm:p-6 pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-6">
+        <div className="mb-4 shrink-0">
           <p className="text-[13px] text-ink-3">Ato</p>
           <h2 className="text-section">{actLabel}</h2>
           <p className="mt-1 max-w-2xl text-[13px] text-ink-3">
@@ -142,7 +308,7 @@ export function ActInternalHistoryPanel({
           </p>
         </div>
 
-        <section className="rounded-[14px] border border-line bg-surface p-4 shadow-sm">
+        <section className="mb-4 shrink-0 rounded-[14px] border border-line bg-surface p-4 shadow-sm">
           <h3 className="mb-3 text-[14px] font-semibold">Comparar registros</h3>
           <div className="flex flex-wrap items-end gap-3">
             <div>
@@ -175,177 +341,82 @@ export function ActInternalHistoryPanel({
           </div>
         </section>
 
-        <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-          <section className="rounded-[14px] border border-line bg-surface p-4 shadow-sm">
-            <h3 className="mb-3 text-[14px] font-semibold">Linha do tempo</h3>
-            {loading ? (
-              <p className="text-[13px] text-ink-3">Carregando…</p>
-            ) : entries.length === 0 ? (
-              <p className="text-[13px] text-ink-3">Nenhum registro ainda.</p>
-            ) : (
-              <ul className="max-h-[70vh] space-y-2 overflow-auto">
-                {entries.map((e) => (
-                  <li key={e.id}>
-                    <button
-                      type="button"
-                      onClick={() => openEntry(e.id)}
-                      className={`w-full rounded-[10px] border px-3 py-2 text-left transition ${
-                        selected?.id === e.id
-                          ? 'border-brand bg-brand/5'
-                          : 'border-line-2 hover:border-brand/40'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <Badge variant="neutral" className="text-[10px]">
-                          {ACAO_LABELS[e.acao] ?? e.acao}
-                        </Badge>
-                        {e.revisionNumber != null && (
-                          <span className="font-mono text-[11px] text-ink-4">
-                            v{e.revisionNumber}
-                          </span>
+        <div
+          className={cn(
+            'grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_1fr]',
+            mobileDetailOpen && 'max-lg:hidden',
+          )}
+        >
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-line bg-surface shadow-sm">
+            <h3 className="shrink-0 border-b border-line-2 px-4 py-3 text-[14px] font-semibold">
+              Linha do tempo
+            </h3>
+            <div ref={timelineScrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
+              {loading ? (
+                <p className="text-[13px] text-ink-3">Carregando…</p>
+              ) : entries.length === 0 ? (
+                <p className="text-[13px] text-ink-3">Nenhum registro ainda.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {entries.map((e) => (
+                    <li key={e.id}>
+                      <button
+                        type="button"
+                        onClick={() => openEntry(e.id)}
+                        className={cn(
+                          'w-full rounded-[10px] border px-3 py-2 text-left transition',
+                          selected?.id === e.id
+                            ? 'border-brand bg-brand/5'
+                            : 'border-line-2 hover:border-brand/40',
                         )}
-                      </div>
-                      <p className="mt-1 text-[12px] text-ink-2">{e.resumo ?? '—'}</p>
-                      <p className="mt-1 text-[11px] text-ink-4">
-                        {new Date(e.createdAt).toLocaleString('pt-BR')}
-                        {e.user ? ` · ${e.user.nome}` : ''}
-                      </p>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <Badge variant="neutral" className="text-[10px]">
+                            {ACAO_LABELS[e.acao] ?? e.acao}
+                          </Badge>
+                          {e.revisionNumber != null && (
+                            <span className="font-mono text-[11px] text-ink-4">
+                              v{e.revisionNumber}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-[12px] text-ink-2">{e.resumo ?? '—'}</p>
+                        <p className="mt-1 text-[11px] text-ink-4">
+                          {new Date(e.createdAt).toLocaleString('pt-BR')}
+                          {e.user ? ` · ${e.user.nome}` : ''}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
 
-          <section className="rounded-[14px] border border-line bg-surface p-5 shadow-sm">
-            {diff ? (
-              <div className="space-y-4">
-                <h3 className="text-[14px] font-semibold">Diferenças</h3>
-                <p className="text-[12px] text-ink-3">
-                  {new Date(diff.left.createdAt).toLocaleString('pt-BR')} →{' '}
-                  {new Date(diff.right.createdAt).toLocaleString('pt-BR')}
-                </p>
-                {diff.diff.metaChanges.length > 0 && (
-                  <div>
-                    <h4 className="mb-2 text-[13px] font-semibold">Metadados</h4>
-                    <ul className="space-y-1 text-[12.5px]">
-                      {diff.diff.metaChanges.map((c) => (
-                        <li key={c.campo} className="rounded border border-line-2 px-2 py-1">
-                          <strong>{c.campo}</strong>: {JSON.stringify(c.de)} →{' '}
-                          {JSON.stringify(c.para)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {diff.diff.units.orderChanged && (
-                  <p className="text-[13px] text-warn">Ordem dos elementos alterada.</p>
-                )}
-                {diff.diff.units.added.length > 0 && (
-                  <div>
-                    <h4 className="mb-2 text-[13px] font-semibold text-ok">Incluídos</h4>
-                    <ul className="space-y-1 text-[12.5px]">
-                      {diff.diff.units.added.map((u) => (
-                        <li key={u.id}>
-                          {u.identificacao ?? u.tipoUnidade}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {diff.diff.units.removed.length > 0 && (
-                  <div>
-                    <h4 className="mb-2 text-[13px] font-semibold text-danger">Removidos</h4>
-                    <ul className="space-y-1 text-[12.5px]">
-                      {diff.diff.units.removed.map((u) => (
-                        <li key={u.id}>
-                          {u.identificacao ?? u.tipoUnidade}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {diff.diff.units.changed.length > 0 && (
-                  <div>
-                    <h4 className="mb-2 text-[13px] font-semibold">Alterados</h4>
-                    <ul className="space-y-2 text-[12.5px]">
-                      {diff.diff.units.changed.map((u) => (
-                        <li key={u.id} className="rounded border border-line-2 p-2">
-                          <p className="font-semibold">
-                            {u.identificacao ?? u.id} ({u.fields.join(', ')})
-                          </p>
-                          {u.fields.includes('texto') && (
-                            <div className="mt-1 grid gap-2 md:grid-cols-2">
-                              <pre className="whitespace-pre-wrap rounded bg-surface-2 p-2 text-[11px]">
-                                {u.de.texto}
-                              </pre>
-                              <pre className="whitespace-pre-wrap rounded bg-brand/5 p-2 text-[11px]">
-                                {u.para.texto}
-                              </pre>
-                            </div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {!diff.diff.metaChanges.length &&
-                  !diff.diff.units.added.length &&
-                  !diff.diff.units.removed.length &&
-                  !diff.diff.units.changed.length &&
-                  !diff.diff.units.orderChanged && (
-                    <p className="text-[13px] text-ink-3">Nenhuma diferença detectada.</p>
-                  )}
-              </div>
-            ) : selected && snapshot ? (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-[14px] font-semibold">
-                    {ACAO_LABELS[selected.acao] ?? selected.acao}
-                  </h3>
-                  <p className="text-[12px] text-ink-3">
-                    {new Date(selected.createdAt).toLocaleString('pt-BR')}
-                    {selected.user ? ` · ${selected.user.nome}` : ''}
-                  </p>
-                  <p className="mt-1 text-[13px]">{selected.resumo}</p>
-                </div>
-                {snapshot.metadata && (
-                  <div>
-                    <h4 className="mb-2 text-[13px] font-semibold">Metadados na fotografia</h4>
-                    <dl className="grid gap-1 text-[12.5px] sm:grid-cols-2">
-                      {Object.entries(snapshot.metadata).map(([k, v]) => (
-                        <div key={k} className="rounded border border-line-2 px-2 py-1">
-                          <dt className="text-[10px] uppercase text-ink-4">{k}</dt>
-                          <dd>{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                )}
-                <div>
-                  <h4 className="mb-2 text-[13px] font-semibold">
-                    Texto estruturado ({snapshot.units?.length ?? 0} elementos)
-                  </h4>
-                  <ul className="max-h-[55vh] space-y-2 overflow-auto">
-                    {(snapshot.units ?? []).map((u) => (
-                      <li key={u.id} className="rounded border border-line-2 p-2 text-[12.5px]">
-                        <p className="font-mono text-[11px] font-semibold text-brand">
-                          {u.identificacao ?? u.tipoUnidade}
-                        </p>
-                        <p className="mt-1 whitespace-pre-wrap text-ink-2">{u.texto}</p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            ) : (
-              <p className="text-[13px] text-ink-3">
-                Selecione um registro na linha do tempo ou compare duas fotografias.
-              </p>
-            )}
+          <section className="hidden min-h-0 flex-col overflow-hidden rounded-[14px] border border-line bg-surface shadow-sm lg:flex">
+            <h3 className="shrink-0 border-b border-line-2 px-5 py-3 text-[14px] font-semibold">
+              Detalhes
+            </h3>
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              <EntryDetails selected={selected} diff={diff} snapshot={snapshot} />
+            </div>
           </section>
         </div>
+
+        {mobileDetailOpen && (
+          <div className="fixed inset-0 z-50 flex flex-col bg-surface lg:hidden">
+            <header className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+              <Button type="button" variant="ghost" size="sm" onClick={closeMobileDetail}>
+                <ArrowLeft className="h-4 w-4" />
+                Voltar ao histórico
+              </Button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-[calc(4.5rem+env(safe-area-inset-bottom))]">
+              <EntryDetails selected={selected} diff={diff} snapshot={snapshot} />
+            </div>
+          </div>
+        )}
       </div>
-    </>
+    </div>
   );
 }

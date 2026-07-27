@@ -9,5 +9,6 @@ import { TextExtractService } from './text-extract.service';
 @Module({
   controllers: [ImportController, ArchiveImportController],
   providers: [ImportService, ArchiveImportService, TextExtractService, OcrService],
+  exports: [TextExtractService, OcrService],
 })
 export class ImportModule {}

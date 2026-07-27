@@ -28,5 +28,18 @@ const m3 = extractActMetadata('', 'decreto-12450-2026.pdf');
 assert(m3.tipo === 'decreto', 'decreto filename');
 assert(m3.numero === 12450, 'decreto numero');
 assert(m3.ano === 2026, 'decreto ano');
+assert(m3.requerConferencia === true, 'filename-only requer conferencia');
 
-console.log('metadata.parser OK', { m1, m3 });
+const text3 = `DECRETO Nº 10.208, DE 29 DE AGOSTO DE 2014
+
+EMENTA: Altera o Decreto nº 5.000 e a Lei Nº 3.000, DE 1 DE JANEIRO DE 2010.
+
+Art. 1º Fica alterado...`;
+
+const m4 = extractActMetadata(text3, 'decreto-10208-2014.pdf');
+assert(m4.tipo === 'decreto', 'decreto header tipo');
+assert(m4.numero === 10208, 'decreto header numero');
+assert(m4.ano === 2014, 'decreto header ano');
+assert(m4.titleFromHeader === true, 'title from header not ementa cite');
+
+console.log('metadata.parser OK', { m1, m3, m4 });

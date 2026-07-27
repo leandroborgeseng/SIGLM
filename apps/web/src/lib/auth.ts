@@ -1,14 +1,36 @@
 import { getApiBaseUrl } from './api-url';
+import { readAccessToken } from './auth-session';
 
 export const ACCESS_TOKEN_COOKIE = 'lm_access_token';
 export const REFRESH_TOKEN_COOKIE = 'lm_refresh_token';
+
+export interface LinkedRoleRef {
+  id: string;
+  nome: string;
+  isPrimary: boolean;
+}
+
+export interface LinkedOrgRef {
+  id: string;
+  nome: string;
+  sigla: string | null;
+  isPrimary: boolean;
+}
 
 export interface AuthUser {
   id: string;
   nome: string;
   email: string;
   role: string;
+  activeRoleId: string;
+  activeOrgaoId: string | null;
+  activeOrgaoAll: boolean;
+  activeOrgaoNome: string | null;
   permissions: string[];
+  mustChangePassword: boolean;
+  linkedRoles: LinkedRoleRef[];
+  linkedOrgs: LinkedOrgRef[];
+  canAccessAllOrgs: boolean;
 }
 
 export interface LoginResponse {
@@ -54,6 +76,49 @@ export async function fetchMe(token: string): Promise<AuthUser> {
     cache: 'no-store',
   });
   if (!res.ok) throw new Error('Sessão expirada');
+  return res.json();
+}
+
+export async function switchContext(
+  data: { roleId?: string; orgaoId?: string | 'all' },
+  token?: string,
+): Promise<LoginResponse> {
+  const authToken = token ?? readAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/auth/switch-context`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = Array.isArray(err.message) ? err.message[0] : err.message;
+    throw new Error(msg ?? 'Erro ao alternar contexto');
+  }
+  return res.json();
+}
+
+export async function changePassword(
+  senhaAtual: string,
+  novaSenha: string,
+  confirmacaoSenha: string,
+): Promise<LoginResponse> {
+  const token = readAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ senhaAtual, novaSenha, confirmacaoSenha }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = Array.isArray(err.message) ? err.message[0] : err.message;
+    throw new Error(msg ?? 'Erro ao alterar senha');
+  }
   return res.json();
 }
 

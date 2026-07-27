@@ -14,6 +14,10 @@ import { recordInternalHistory } from '../normative-acts/act-versioning.utils';
 import { OcrService } from './ocr.service';
 import { mergeOcrPages, parseStructure } from './structure.parser';
 import { parseLegislativeEffects, type SuggestedLegislativeEffect } from './effects.parser';
+import {
+  identificacaoFromBlock,
+  prepareUnitBlocksFromStructure,
+} from './structure-blocks.utils';
 import { TextExtractService } from './text-extract.service';
 
 @Injectable()
@@ -365,48 +369,9 @@ export class ImportService {
       }
     }
 
-    // Garante ementa como unidade estruturada (não só metadado)
-    let rawBlocks = [...estrutura.blocos];
-    if (!rawBlocks.some((b) => b.tipo === 'ementa') && ementa) {
-      rawBlocks = [
-        {
-          tag: 'Ementa',
-          tipo: 'ementa',
-          texto: ementa,
-          ordem: -1,
-          parentOrdem: null,
-        },
-        ...rawBlocks,
-      ];
-    }
-    rawBlocks = rawBlocks.map((b) =>
-      b.tipo === 'considerando'
-        ? { ...b, tipo: 'preambulo', tag: 'Preâmbulo' }
-        : b,
-    );
-
-    const merged: typeof rawBlocks = [];
-    const oldOrdemToNew = new Map<number, number>();
-    for (const b of rawBlocks) {
-      const last = merged[merged.length - 1];
-      if (b.tipo === 'preambulo' && last?.tipo === 'preambulo') {
-        last.texto = `${last.texto}\n\n${b.texto}`;
-        oldOrdemToNew.set(b.ordem, merged.length - 1);
-        continue;
-      }
-      if (b.tipo === 'ementa' && last?.tipo === 'ementa') {
-        last.texto = `${last.texto} ${b.texto}`.trim();
-        oldOrdemToNew.set(b.ordem, merged.length - 1);
-        continue;
-      }
-      oldOrdemToNew.set(b.ordem, merged.length);
-      merged.push({ ...b, ordem: merged.length });
-    }
-    const unitBlocks = merged.map((b) => ({
-      ...b,
-      parentOrdem:
-        b.parentOrdem == null ? null : (oldOrdemToNew.get(b.parentOrdem) ?? null),
-    }));
+    const { unitBlocks } = prepareUnitBlocksFromStructure(estrutura.blocos, {
+      fallbackEmenta: ementa,
+    });
 
     // Transferência definitiva do arquivo ANTES de criar o ato (evita cadastro sem original).
     const importRecord = await this.prisma.import.findUnique({ where: { id: importId } });
@@ -445,29 +410,7 @@ export class ImportService {
         units: {
           create: unitBlocks.map((b, i) => ({
             tipoUnidade: b.tipo as UnitType,
-            identificacao: [
-              'artigo',
-              'paragrafo_unico',
-              'paragrafo',
-              'inciso',
-              'alinea',
-              'item',
-              'titulo',
-              'subtitulo',
-              'capitulo',
-              'subcapitulo',
-              'secao',
-              'subsecao',
-              'parte',
-              'livro',
-              'anexo',
-            ].includes(b.tipo)
-              ? b.tag
-              : b.tipo === 'preambulo'
-                ? 'Preâmbulo'
-                : b.tipo === 'ementa'
-                  ? 'Ementa'
-                  : null,
+            identificacao: identificacaoFromBlock(b),
             texto: b.texto,
             ordem: i,
             ...(b.tipo === 'texto_simples' && b.formatacao

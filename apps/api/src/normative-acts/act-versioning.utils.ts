@@ -24,6 +24,10 @@ export type ActSnapshot = {
     palavrasChave: string[];
     statusPublicacao: string;
     editionOpen: boolean;
+    responsavelEstruturacaoId: string | null;
+    responsavelRevisaoId: string | null;
+    responsavelEstruturacaoNome: string | null;
+    responsavelRevisaoNome: string | null;
   };
   units: {
     id: string;
@@ -77,6 +81,8 @@ export async function buildActSnapshot(
       signatories: { orderBy: { ordem: 'asc' } },
       units: { orderBy: { ordem: 'asc' } },
       attachments: { orderBy: [{ ordem: 'asc' }, { criadoEm: 'asc' }] },
+      responsavelEstruturacao: { select: { id: true, nome: true, ativo: true } },
+      responsavelRevisao: { select: { id: true, nome: true, ativo: true } },
     },
   });
   const unitIds = act.units.map((u) => u.id);
@@ -123,6 +129,10 @@ export async function buildActSnapshot(
       palavrasChave: act.palavrasChave,
       statusPublicacao: act.statusPublicacao,
       editionOpen: act.editionOpen,
+      responsavelEstruturacaoId: act.responsavelEstruturacaoId,
+      responsavelRevisaoId: act.responsavelRevisaoId,
+      responsavelEstruturacaoNome: act.responsavelEstruturacao?.nome ?? null,
+      responsavelRevisaoNome: act.responsavelRevisao?.nome ?? null,
     },
     units: act.units.map((u) => ({
       id: u.id,

@@ -4,9 +4,15 @@ import { SlidersHorizontal, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { FilterSidebar } from '@/components/public/FilterSidebar';
-import type { FilterCounts } from '@/lib/types';
+import type { FilterCounts, PublicOriginOrgOption } from '@/lib/types';
 
-export function MobileFilterDrawer({ counts }: { counts: FilterCounts }) {
+export function MobileFilterDrawer({
+  initialCounts,
+  orgaos,
+}: {
+  initialCounts: FilterCounts;
+  orgaos: PublicOriginOrgOption[];
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -35,7 +41,7 @@ export function MobileFilterDrawer({ counts }: { counts: FilterCounts }) {
             role="dialog"
             aria-modal="true"
             aria-label="Filtros de busca"
-            className="relative ml-auto flex h-full w-[min(100%,320px)] flex-col bg-surface shadow-lg"
+            className="relative ml-auto flex h-full w-[min(100%,320px)] flex-col bg-surface shadow-lg pb-[env(safe-area-inset-bottom)]"
           >
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <h2 className="text-[15px] font-semibold text-ink">Filtros</h2>
@@ -49,7 +55,11 @@ export function MobileFilterDrawer({ counts }: { counts: FilterCounts }) {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
-              <FilterSidebar counts={counts} onChange={() => setOpen(false)} />
+              <FilterSidebar
+                initialCounts={initialCounts}
+                orgaos={orgaos}
+                onChange={() => setOpen(false)}
+              />
             </div>
           </aside>
         </div>

@@ -209,6 +209,14 @@ export class UpdateActDto {
   @IsOptional()
   @IsEnum(EditorialStage)
   etapaEditorial?: EditorialStage;
+
+  @IsOptional()
+  @IsString()
+  responsavelEstruturacaoId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  responsavelRevisaoId?: string | null;
 }
 
 export class UnitInputDto {
@@ -350,4 +358,134 @@ export class DeleteUnitDto {
   @IsOptional()
   @IsBoolean()
   confirmEffectCleanup?: boolean;
+}
+
+export class StructureFromOriginalDto {
+  /** Obrigatório quando o ato já possui unidades — confirma substituição total. */
+  @IsOptional()
+  @IsBoolean()
+  confirmReplace?: boolean;
+}
+
+export class UpdateIdentifiedImportTextDto {
+  @IsString()
+  textoIdentificadoImportacao!: string;
+}
+
+export class BatchSignatoryDto {
+  @IsOptional()
+  @IsString()
+  signatoryId?: string | null;
+
+  @IsString()
+  @MinLength(1)
+  nome!: string;
+
+  @IsString()
+  @MinLength(1)
+  cargo!: string;
+
+  @IsIn(['append', 'replace'])
+  mode!: 'append' | 'replace';
+}
+
+export class BatchUpdateActsDto {
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  actIds?: string[];
+
+  /** Seleciona todos os atos que casam com os filtros informados (ignora paginação). */
+  @IsOptional()
+  @IsBoolean()
+  selectAllFiltered?: boolean;
+
+  @IsIn([
+    'set_responsavel_estruturacao',
+    'set_responsavel_revisao',
+    'set_meio_publicacao',
+    'set_signatario',
+  ])
+  action!:
+    | 'set_responsavel_estruturacao'
+    | 'set_responsavel_revisao'
+    | 'set_meio_publicacao'
+    | 'set_signatario';
+
+  @IsOptional()
+  @IsString()
+  responsavelEstruturacaoId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  responsavelRevisaoId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  meioPublicacaoId?: string | null;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BatchSignatoryDto)
+  signatory?: BatchSignatoryDto;
+
+  @IsOptional()
+  @IsEnum(ActType)
+  tipo?: ActType;
+
+  @IsOptional()
+  @IsEnum(ActSituacao)
+  situacao?: ActSituacao;
+
+  @IsOptional()
+  @IsString()
+  statusPublicacao?: string;
+
+  @IsOptional()
+  @IsEnum(EditorialStage)
+  etapaEditorial?: EditorialStage;
+
+  @IsOptional()
+  @IsString()
+  norma?: string;
+
+  @IsOptional()
+  @IsString()
+  ementa?: string;
+
+  @IsOptional()
+  @IsString()
+  publicadoDe?: string;
+
+  @IsOptional()
+  @IsString()
+  publicadoAte?: string;
+
+  @IsOptional()
+  @IsString()
+  orgaoOrigemId?: string;
+
+  @IsOptional()
+  @IsString()
+  numeroDe?: string;
+
+  @IsOptional()
+  @IsString()
+  numeroAte?: string;
+
+  @IsOptional()
+  @IsString()
+  meioPublicacaoIdFilter?: string;
+
+  @IsOptional()
+  @IsString()
+  signatarioNome?: string;
+
+  @IsOptional()
+  @IsString()
+  responsavelEstruturacaoIdFilter?: string;
+
+  @IsOptional()
+  @IsString()
+  responsavelRevisaoIdFilter?: string;
 }

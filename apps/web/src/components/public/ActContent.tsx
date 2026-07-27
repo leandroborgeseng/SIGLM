@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { ChevronDown } from 'lucide-react';
 import { FrancaBrasao } from '@/components/brand/FrancaBrasao';
 import { getApiBaseUrl } from '@/lib/api-url';
-import { cn, formatDate, formatFormalTitle } from '@/lib/format';
+import { cn, formatDate, formatFormalTitle, actUrl } from '@/lib/format';
 import { formatacaoClassNames, sanitizeUnitHtml } from '@/lib/rich-text';
 import {
   unitAnchorId,
@@ -14,6 +15,62 @@ import {
   UNIT_TYPE_LABELS,
 } from '@/lib/unit-hierarchy';
 import type { ActAttachment, ActDetail, NormativeUnit, UnitType } from '@/lib/types';
+
+function UnitNote({
+  nota,
+  notaLink,
+}: {
+  nota: string;
+  notaLink?: { href: string; externo?: boolean } | null;
+}) {
+  const className = cn('mt-1 text-[12px]', noteClass(nota));
+  if (!notaLink?.href) {
+    return <p className={className}>{nota}</p>;
+  }
+  if (notaLink.externo) {
+    return (
+      <p className={className}>
+        <a
+          href={notaLink.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[#0066cc] underline hover:opacity-90"
+        >
+          {nota}
+        </a>
+      </p>
+    );
+  }
+  return (
+    <p className={className}>
+      <Link href={notaLink.href} className="text-[#0066cc] underline hover:opacity-90">
+        {nota}
+      </Link>
+    </p>
+  );
+}
+
+function OutboundEffects({
+  effects,
+}: {
+  effects: { label: string; href: string }[];
+}) {
+  if (effects.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {effects.map((e) => (
+        <li key={`${e.href}-${e.label}`}>
+          <Link
+            href={e.href}
+            className="text-[11px] text-brand hover:underline"
+          >
+            {e.label}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function noteClass(nota: string | null): string {
   if (!nota) return 'text-ink-3';
@@ -128,11 +185,14 @@ function UnitBlock({
         id={anchorId}
         className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] text-left sm:w-[min(100%,50%)]"
       >
-        <p className="text-left text-[14.5px] leading-relaxed text-ink">
+        <p className="text-justify text-[14.5px] leading-relaxed text-ink">
           <RichHtml html={texto} />
         </p>
         {mode === 'consolidado' && unit.nota && (
-          <p className={cn('mt-1 text-left text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
+          <UnitNote nota={unit.nota} notaLink={unit.notaLink} />
+        )}
+        {mode === 'consolidado' && (unit.alteracoesSaida?.length ?? 0) > 0 && (
+          <OutboundEffects effects={unit.alteracoesSaida!} />
         )}
       </article>
     );
@@ -160,7 +220,10 @@ function UnitBlock({
           <RichHtml html={texto} />
         </p>
         {mode === 'consolidado' && unit.nota && (
-          <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
+          <UnitNote nota={unit.nota} notaLink={unit.notaLink} />
+        )}
+        {mode === 'consolidado' && (unit.alteracoesSaida?.length ?? 0) > 0 && (
+          <OutboundEffects effects={unit.alteracoesSaida!} />
         )}
       </article>
     );
@@ -174,7 +237,10 @@ function UnitBlock({
           <RichHtml html={texto} />
         </h3>
         {mode === 'consolidado' && unit.nota && (
-          <p className={cn('mt-1 text-center text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
+          <UnitNote nota={unit.nota} notaLink={unit.notaLink} />
+        )}
+        {mode === 'consolidado' && (unit.alteracoesSaida?.length ?? 0) > 0 && (
+          <OutboundEffects effects={unit.alteracoesSaida!} />
         )}
       </article>
     );
@@ -212,7 +278,10 @@ function UnitBlock({
         </span>
       </p>
       {mode === 'consolidado' && unit.nota && (
-        <p className={cn('mt-1 text-[12px]', noteClass(unit.nota))}>{unit.nota}</p>
+        <UnitNote nota={unit.nota} notaLink={unit.notaLink} />
+      )}
+      {mode === 'consolidado' && (unit.alteracoesSaida?.length ?? 0) > 0 && (
+        <OutboundEffects effects={unit.alteracoesSaida!} />
       )}
     </article>
   );
@@ -289,6 +358,25 @@ export function ActContent({ act }: { act: ActDetail }) {
   const [tocOpen, setTocOpen] = useState(false);
 
   const displayUnits = useMemo(() => sortUnitsForDisplay(act.units), [act.units]);
+
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (!hash) return;
+
+    const scrollToAnchor = () => {
+      const el = document.getElementById(hash);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-brand/40', 'ring-offset-2', 'transition-shadow');
+      const timer = window.setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-brand/40', 'ring-offset-2', 'transition-shadow');
+      }, 2400);
+      return () => window.clearTimeout(timer);
+    };
+
+    const cleanup = scrollToAnchor();
+    return cleanup;
+  }, [displayUnits]);
   const ementaUnit = displayUnits.find((u) => u.tipoUnidade === 'ementa');
   const bodyUnits = displayUnits.filter((u) => u.tipoUnidade !== 'ementa');
   const tocUnits = useMemo(
@@ -407,7 +495,7 @@ export function ActContent({ act }: { act: ActDetail }) {
         {tab !== 'historico' && ementaUnit ? (
           <UnitBlock unit={ementaUnit} mode={tab} />
         ) : tab !== 'historico' && act.ementa ? (
-          <p className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] text-left text-[14.5px] leading-relaxed text-ink sm:w-[min(100%,50%)]">
+          <p className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] text-justify text-[14.5px] leading-relaxed text-ink sm:w-[min(100%,50%)]">
             <RichHtml html={act.ementa} />
           </p>
         ) : null}
@@ -458,12 +546,45 @@ export function ActContent({ act }: { act: ActDetail }) {
               {act.history.map((h) => (
                 <li key={h.id}>
                   <p className="text-[12px] text-ink-3">{formatDate(h.data)}</p>
-                  <p className="mt-0.5 font-medium text-ink">{h.nota ?? h.tipoAlteracao}</p>
+                  <p className="mt-0.5 font-medium text-ink">
+                    {h.nota ?? h.tipoAlteracao}
+                    {h.incomplete ? (
+                      <span className="ml-2 text-[11px] text-warn">(vínculo incompleto)</span>
+                    ) : null}
+                  </p>
                   {h.dispositivo && (
                     <p className="text-[13px] text-ink-2">Dispositivo: {h.dispositivo}</p>
                   )}
+                  {h.sourceUnit?.identificacao && (
+                    <p className="text-[13px] text-ink-2">
+                      Elemento alterador: {h.sourceUnit.identificacao}
+                    </p>
+                  )}
                   {h.normaAlteradora && (
-                    <p className="text-[13px] text-brand">{h.normaAlteradora.codigo}</p>
+                    <Link
+                      href={actUrl(h.normaAlteradora.slug)}
+                      className="text-[13px] text-brand hover:underline"
+                    >
+                      {h.normaAlteradora.codigo}
+                    </Link>
+                  )}
+                  {h.externalSource && (
+                    <p className="text-[13px] text-ink-2">
+                      Fonte externa: {h.externalSource.emissor}
+                      {h.externalSource.url ? (
+                        <>
+                          {' '}
+                          <a
+                            href={h.externalSource.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-brand hover:underline"
+                          >
+                            (link)
+                          </a>
+                        </>
+                      ) : null}
+                    </p>
                   )}
                 </li>
               ))}

@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil, Upload } from 'lucide-react';
+import { Pencil, Trash2, Upload } from 'lucide-react';
 import { AdminTopbar } from '@/components/admin/AdminShell';
+import { DeleteImportBlockDialog } from '@/components/admin/DeleteImportBlockDialog';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Form';
@@ -20,10 +21,16 @@ import {
   type ImportDetail,
 } from '@/lib/admin-api';
 import { ACT_TYPE_LABELS, ACT_TYPES } from '@/lib/format';
+import {
+  deleteImportBlock,
+  importBlockLabel,
+  type ImportStructureBlock,
+} from '@/lib/import-structure';
 import type { ActType, UnitType } from '@/lib/types';
 import {
   DIVISION_TYPES,
   HIERARCHY_TYPES,
+  TEXT_GROUP_TYPES,
   UNIT_TYPE_LABELS,
 } from '@/lib/unit-hierarchy';
 
@@ -41,21 +48,7 @@ const EDITABLE_TYPES: UnitType[] = [
   'texto_simples',
 ];
 
-type StructureBlock = {
-  tag: string;
-  tipo: string;
-  texto: string;
-  confianca: number;
-  ordem: number;
-  parentOrdem?: number | null;
-  formatacao?: {
-    align?: 'left' | 'center' | 'right' | 'justify';
-    bold?: boolean;
-    italic?: boolean;
-    underline?: boolean;
-    letterSpacing?: 'normal' | 'expanded';
-  } | null;
-};
+const UNDO_TIMEOUT_MS = 8000;
 
 export function ImportPanel() {
   const router = useRouter();
@@ -77,9 +70,12 @@ export function ImportPanel() {
     ano: String(new Date().getFullYear()),
     ementa: '',
   });
-  const [blocos, setBlocos] = useState<StructureBlock[]>([]);
+  const [blocos, setBlocos] = useState<ImportStructureBlock[]>([]);
   const [dirty, setDirty] = useState(false);
   const [editingOrdem, setEditingOrdem] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ImportStructureBlock | null>(null);
+  const [undoSnapshot, setUndoSnapshot] = useState<ImportStructureBlock[] | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [efeitosAceitos, setEfeitosAceitos] = useState<Set<string>>(new Set());
   const [splitPct, setSplitPct] = useState(DEFAULT_SPLIT_PCT);
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
@@ -157,8 +153,8 @@ export function ImportPanel() {
         texto: b.texto,
         confianca: b.confianca,
         ordem: i,
-        parentOrdem: (b as StructureBlock).parentOrdem ?? null,
-        formatacao: (b as StructureBlock).formatacao ?? null,
+        parentOrdem: (b as ImportStructureBlock).parentOrdem ?? null,
+        formatacao: (b as ImportStructureBlock).formatacao ?? null,
       })),
     );
     setDirty(false);
@@ -217,11 +213,59 @@ export function ImportPanel() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [dirty]);
 
-  const updateBloco = (ordem: number, patch: Partial<StructureBlock>) => {
+  const updateBloco = (ordem: number, patch: Partial<ImportStructureBlock>) => {
     setBlocos((prev) =>
       prev.map((b) => (b.ordem === ordem ? { ...b, ...patch } : b)),
     );
     setDirty(true);
+  };
+
+  const clearUndoTimer = () => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+  };
+
+  const scheduleUndoClear = () => {
+    clearUndoTimer();
+    undoTimerRef.current = setTimeout(() => {
+      setUndoSnapshot(null);
+      undoTimerRef.current = null;
+    }, UNDO_TIMEOUT_MS);
+  };
+
+  useEffect(() => () => clearUndoTimer(), []);
+
+  const handleDeleteBlock = (opts: {
+    mode: 'cascade' | 'reparent';
+    newParentOrdemForChildren: number | null;
+  }) => {
+    if (!deleteTarget) return;
+    const label = importBlockLabel(deleteTarget);
+    setUndoSnapshot(blocos.map((b) => ({ ...b })));
+    scheduleUndoClear();
+
+    const next = deleteImportBlock(
+      blocos,
+      deleteTarget.ordem,
+      opts.mode,
+      opts.newParentOrdemForChildren,
+    );
+    setBlocos(next);
+    setDirty(true);
+    if (editingOrdem === deleteTarget.ordem) setEditingOrdem(null);
+    setDeleteTarget(null);
+    toast(`"${label}" removido da estrutura`, 'neutral');
+  };
+
+  const handleUndoDelete = () => {
+    if (!undoSnapshot) return;
+    setBlocos(undoSnapshot.map((b) => ({ ...b })));
+    setUndoSnapshot(null);
+    clearUndoTimer();
+    setDirty(true);
+    toast('Exclusão desfeita', 'ok');
   };
 
   const persistStructure = async () => {
@@ -614,6 +658,9 @@ export function ImportPanel() {
                     <ul className="space-y-2">
                       {blocos.map((item) => {
                         const editing = editingOrdem === item.ordem;
+                        const isEmenta = item.tipo === 'ementa';
+                        const isPreambulo = item.tipo === 'preambulo';
+                        const isTextGroup = TEXT_GROUP_TYPES.includes(item.tipo as UnitType);
                         return (
                           <li
                             key={`${item.ordem}-${item.tag}`}
@@ -632,9 +679,15 @@ export function ImportPanel() {
                                     </label>
                                     <Select
                                       value={item.tipo}
-                                      onChange={(e) =>
-                                        updateBloco(item.ordem, { tipo: e.target.value })
-                                      }
+                                      onChange={(e) => {
+                                        const nextTipo = e.target.value;
+                                        updateBloco(item.ordem, {
+                                          tipo: nextTipo,
+                                          ...(nextTipo === 'ementa'
+                                            ? { parentOrdem: null, needsParentReview: false }
+                                            : {}),
+                                        });
+                                      }}
                                     >
                                       {typeOptions.map((t) => (
                                         <option key={t.value} value={t.value}>
@@ -666,37 +719,57 @@ export function ImportPanel() {
                                     className="min-h-[88px] w-full rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] focus-ring"
                                   />
                                 </div>
-                                <div>
-                                  <label className="mb-1 block text-[11px] text-ink-3">
-                                    Vincular a (elemento pai)
-                                  </label>
-                                  <Select
-                                    value={
-                                      item.parentOrdem == null ? '' : String(item.parentOrdem)
-                                    }
-                                    onChange={(e) =>
-                                      updateBloco(item.ordem, {
-                                        parentOrdem:
-                                          e.target.value === ''
-                                            ? null
-                                            : Number(e.target.value),
-                                      })
-                                    }
-                                  >
-                                    <option value="">Nenhum (nível superior)</option>
-                                    {blocos
-                                      .filter((b) => b.ordem !== item.ordem && b.ordem < item.ordem)
-                                      .map((b) => (
-                                        <option key={b.ordem} value={b.ordem}>
-                                          [{b.ordem}] {b.tag} ({UNIT_TYPE_LABELS[b.tipo as UnitType] ?? b.tipo})
-                                        </option>
-                                      ))}
-                                  </Select>
-                                  <p className="mt-1 text-[10px] text-ink-4">
-                                    Pode corrigir vínculos atípicos do documento original — o
-                                    sistema não bloqueia estruturas fora do padrão.
-                                  </p>
-                                </div>
+                                {!isEmenta && (
+                                  <div>
+                                    <label className="mb-1 block text-[11px] text-ink-3">
+                                      Vincular a (elemento pai)
+                                    </label>
+                                    <Select
+                                      value={
+                                        item.parentOrdem == null ? '' : String(item.parentOrdem)
+                                      }
+                                      onChange={(e) =>
+                                        updateBloco(item.ordem, {
+                                          parentOrdem:
+                                            e.target.value === ''
+                                              ? null
+                                              : Number(e.target.value),
+                                          needsParentReview: false,
+                                        })
+                                      }
+                                    >
+                                      <option value="">Nenhum (nível superior)</option>
+                                      {blocos
+                                        .filter(
+                                          (b) => b.ordem !== item.ordem && b.ordem < item.ordem,
+                                        )
+                                        .map((b) => (
+                                          <option key={b.ordem} value={b.ordem}>
+                                            [{b.ordem}] {b.tag} (
+                                            {UNIT_TYPE_LABELS[b.tipo as UnitType] ?? b.tipo})
+                                          </option>
+                                        ))}
+                                    </Select>
+                                    {isPreambulo && (
+                                      <p className="mt-1 text-[10px] text-ink-4">
+                                        O Preâmbulo normalmente fica em nível superior; vínculos
+                                        atípicos são permitidos para atos históricos.
+                                      </p>
+                                    )}
+                                    {isTextGroup && !isPreambulo && !isEmenta && (
+                                      <p className="mt-1 text-[10px] text-ink-4">
+                                        Texto simples pode ser vinculado a divisões ou dispositivos
+                                        quando necessário.
+                                      </p>
+                                    )}
+                                    {!isTextGroup && (
+                                      <p className="mt-1 text-[10px] text-ink-4">
+                                        Pode corrigir vínculos atípicos do documento original — o
+                                        sistema não bloqueia estruturas fora do padrão.
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
                                 <div className="flex justify-end">
                                   <Button
                                     size="sm"
@@ -726,6 +799,11 @@ export function ImportPanel() {
                                         ↳ [{item.parentOrdem}]
                                       </span>
                                     )}
+                                    {item.needsParentReview && (
+                                      <Badge variant="warn" className="text-[10px]">
+                                        Revisar vínculo
+                                      </Badge>
+                                    )}
                                   </div>
                                   {item.texto && (
                                     <p className="mt-1 line-clamp-3 text-[12px] text-ink-3">
@@ -737,14 +815,25 @@ export function ImportPanel() {
                                   <span className="font-mono text-[12px] text-ink-3">
                                     {item.confianca}%
                                   </span>
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
-                                    onClick={() => setEditingOrdem(item.ordem)}
-                                  >
-                                    <Pencil className="h-3 w-3" />
-                                    Editar
-                                  </button>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
+                                      onClick={() => setEditingOrdem(item.ordem)}
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                      Editar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center gap-1 text-[11px] text-danger hover:underline"
+                                      onClick={() => setDeleteTarget(item)}
+                                      aria-label={`Excluir ${item.tag}`}
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                      Excluir
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -860,6 +949,27 @@ export function ImportPanel() {
           </>
         )}
       </div>
+
+      {undoSnapshot && (
+        <div className="pointer-events-auto fixed bottom-6 left-1/2 z-50 flex max-w-[min(100vw-2rem,28rem)] -translate-x-1/2 items-center gap-3 rounded-[10px] bg-ink px-4 py-2.5 text-[13.5px] font-medium text-white shadow-lg">
+          <span className="min-w-0 flex-1">Elemento excluído da estrutura provisória</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-[6px] bg-white/15 px-2.5 py-1 text-[12px] font-semibold hover:bg-white/25"
+            onClick={handleUndoDelete}
+          >
+            Desfazer
+          </button>
+        </div>
+      )}
+
+      <DeleteImportBlockDialog
+        open={Boolean(deleteTarget)}
+        block={deleteTarget}
+        blocks={blocos}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteBlock}
+      />
     </div>
   );
 }

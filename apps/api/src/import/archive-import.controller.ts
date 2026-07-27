@@ -54,6 +54,20 @@ export class ArchiveImportController {
     res.sendFile(filePath);
   }
 
+  @Get(':batchId/items/:itemId/preview')
+  async preview(
+    @Param('batchId') batchId: string,
+    @Param('itemId') itemId: string,
+    @Res() res: Response,
+  ) {
+    const { html, filename } = await this.archive.getItemPreviewHtml(batchId, itemId);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}.html"`);
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title>
+<style>body{font-family:Georgia,serif;line-height:1.5;padding:1.5rem;max-width:800px;margin:0 auto;color:#222}</style>
+</head><body>${html}</body></html>`);
+  }
+
   @Patch(':batchId/items/:itemId')
   updateItem(
     @Param('batchId') batchId: string,
@@ -66,6 +80,7 @@ export class ArchiveImportController {
       dataAto?: string | null;
       ementa?: string | null;
       resolucao?: 'ignore' | 'link' | 'create' | null;
+      textoIdentificadoImportacao?: string | null;
     },
   ) {
     return this.archive.updateItem(batchId, itemId, body);

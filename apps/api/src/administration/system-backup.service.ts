@@ -35,6 +35,9 @@ type BackupPayload = {
   permissions: unknown[];
   roles: unknown[];
   rolePermissions: unknown[];
+  userPermissions?: unknown[];
+  userRoles?: unknown[];
+  userOriginOrgs?: unknown[];
   users: unknown[];
   originOrgs: unknown[];
   publicationMedia: unknown[];
@@ -242,6 +245,9 @@ export class SystemBackupService {
       permissions,
       roles,
       rolePermissions,
+      userPermissions,
+      userRoles,
+      userOriginOrgs,
       users,
       originOrgs,
       publicationMedia,
@@ -266,6 +272,9 @@ export class SystemBackupService {
       this.prisma.permission.findMany(),
       this.prisma.role.findMany(),
       this.prisma.rolePermission.findMany(),
+      this.prisma.userPermission.findMany(),
+      this.prisma.userRole.findMany(),
+      this.prisma.userOriginOrg.findMany(),
       this.prisma.user.findMany(),
       this.prisma.originOrg.findMany(),
       this.prisma.publicationMedium.findMany(),
@@ -320,6 +329,9 @@ export class SystemBackupService {
       permissions,
       roles,
       rolePermissions,
+      userPermissions,
+      userRoles,
+      userOriginOrgs,
       users,
       originOrgs,
       publicationMedia,
@@ -368,6 +380,9 @@ export class SystemBackupService {
             "origin_orgs",
             "audit_logs",
             "role_permissions",
+            "user_permissions",
+            "user_roles",
+            "user_origin_orgs",
             "users",
             "roles",
             "permissions",
@@ -386,8 +401,23 @@ export class SystemBackupService {
             data: data.rolePermissions as Prisma.RolePermissionCreateManyInput[],
           });
         }
+        if (data.userPermissions?.length) {
+          await tx.userPermission.createMany({
+            data: data.userPermissions as Prisma.UserPermissionCreateManyInput[],
+          });
+        }
         if (data.users?.length) {
           await tx.user.createMany({ data: data.users as Prisma.UserCreateManyInput[] });
+        }
+        if (data.userRoles?.length) {
+          await tx.userRole.createMany({
+            data: data.userRoles as Prisma.UserRoleCreateManyInput[],
+          });
+        }
+        if (data.userOriginOrgs?.length) {
+          await tx.userOriginOrg.createMany({
+            data: data.userOriginOrgs as Prisma.UserOriginOrgCreateManyInput[],
+          });
         }
         if (data.originOrgs?.length) {
           await tx.originOrg.createMany({ data: data.originOrgs as Prisma.OriginOrgCreateManyInput[] });

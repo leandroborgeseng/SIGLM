@@ -85,7 +85,37 @@ export type FormalTitleOptions = {
   prefixo?: string | null;
 };
 
-/** Título formal: "{TIPO}[ CONJUNTA][ {PREFIXO}] Nº {n}, DE {data}". */
+export type ActCodeOptions = FormalTitleOptions;
+
+const FEMININE_ACT_TYPES: ReadonlySet<ActType> = new Set([
+  'lei',
+  'lei_complementar',
+  'resolucao',
+  'portaria',
+  'instrucao_normativa',
+]);
+
+/** "Conjunta" / "Conjunto" conforme o gênero do tipo do ato. */
+export function conjuntoSuffix(tipo: ActType, atoConjunto?: boolean, upper = false): string {
+  if (!atoConjunto) return '';
+  const word = FEMININE_ACT_TYPES.has(tipo) ? 'Conjunta' : 'Conjunto';
+  return upper ? ` ${word.toUpperCase()}` : ` ${word}`;
+}
+
+/** Título resumido: "{Tipo}[ Conjunt{a|o}][ {PREFIXO}] nº {n}/{ano}". */
+export function formatActCode(
+  tipo: ActType,
+  numero: number,
+  ano: number,
+  options?: ActCodeOptions,
+): string {
+  const typeLabel = ACT_TYPE_LABELS[tipo];
+  const conjunto = conjuntoSuffix(tipo, options?.atoConjunto);
+  const prefixo = options?.prefixo?.trim() ? ` ${options.prefixo.trim()}` : '';
+  return `${typeLabel}${conjunto}${prefixo} nº ${numero.toLocaleString('pt-BR')}/${ano}`;
+}
+
+/** Título formal: "{TIPO}[ CONJUNT{A|O}][ {PREFIXO}] Nº {n}, DE {data}". */
 export function formatFormalTitle(
   tipo: ActType,
   numero: number,
@@ -95,7 +125,7 @@ export function formatFormalTitle(
 ): string {
   const typeLabel = ACT_TYPE_LABELS[tipo].toUpperCase();
   const num = numero.toLocaleString('pt-BR');
-  const conjunto = options?.atoConjunto ? ' CONJUNTA' : '';
+  const conjunto = conjuntoSuffix(tipo, options?.atoConjunto, true);
   const prefixo = options?.prefixo?.trim() ? ` ${options.prefixo.trim().toUpperCase()}` : '';
   const head = `${typeLabel}${conjunto}${prefixo}`;
 
@@ -136,6 +166,19 @@ export function toDateInputValue(date: string | null | undefined): string {
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return '';
   return d.toISOString().slice(0, 10);
+}
+
+export function formatOriginOrgLabel(org: { sigla?: string | null; nome: string }): string {
+  const sigla = org.sigla?.trim();
+  return sigla ? `${sigla} • ${org.nome}` : org.nome;
+}
+
+export function parseNumeroFilter(value: string): number | null {
+  const cleaned = value.trim().replace(/\./g, '').replace(/,/g, '');
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return null;
+  return n;
 }
 
 export function actUrl(slug: string): string {

@@ -6,6 +6,7 @@ import {
   ACCESS_TOKEN_COOKIE,
   clearAuthCookies,
   fetchMe,
+  setAuthCookies,
   type AuthUser,
 } from '@/lib/auth';
 import {
@@ -26,6 +27,8 @@ interface AdminAuthContextValue {
   loading: boolean;
   can: (permission: AdminPermission) => boolean;
   logout: () => void;
+  refreshUser: () => Promise<void>;
+  applySession: (accessToken: string, refreshToken: string, nextUser: AuthUser) => void;
 }
 
 const AdminAuthContext = createContext<AdminAuthContextValue | null>(null);
@@ -89,6 +92,31 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- montagem única
   }, [router]);
 
+  const refreshUser = async () => {
+    const token = readCookie(ACCESS_TOKEN_COOKIE) ?? (await ensureFreshAccessToken());
+    if (!token) return;
+    try {
+      const me = await fetchMe(token);
+      setUser(me);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const applySession = (accessToken: string, refreshToken: string, nextUser: AuthUser) => {
+    setAuthCookies(accessToken, refreshToken);
+    setUser(nextUser);
+  };
+
+  // Bloqueia rotas admin enquanto mustChangePassword estiver ativo.
+  useEffect(() => {
+    if (loading || !user?.mustChangePassword) return;
+    const path = pathname ?? '';
+    if (path.startsWith('/admin/login') || path.startsWith('/admin/alterar-senha')) return;
+    const from = path || '/admin/atos';
+    router.replace(`/admin/alterar-senha?from=${encodeURIComponent(from)}`);
+  }, [loading, user?.mustChangePassword, pathname, router]);
+
   // Renovação preventiva enquanto a aba estiver aberta / em foco.
   useEffect(() => {
     if (!user && !bootstrapped.current) return;
@@ -120,7 +148,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const can = (permission: AdminPermission) => hasPermission(user?.permissions, permission);
 
   return (
-    <AdminAuthContext.Provider value={{ user, loading, can, logout }}>
+    <AdminAuthContext.Provider value={{ user, loading, can, logout, refreshUser, applySession }}>
       {children}
     </AdminAuthContext.Provider>
   );

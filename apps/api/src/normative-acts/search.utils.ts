@@ -22,6 +22,7 @@ export interface FtsFilterParams {
   assunto?: string;
   publicadoDe?: string;
   publicadoAte?: string;
+  orgaoOrigemId?: string;
 }
 
 export function buildFtsFilterSql(
@@ -60,6 +61,13 @@ export function buildFtsFilterSql(
     params.push(filters.publicadoAte);
     parts.push(`na.data_publicacao <= $${i++}::date`);
   }
+  if (filters.orgaoOrigemId) {
+    params.push(filters.orgaoOrigemId);
+    parts.push(
+      `(EXISTS (SELECT 1 FROM act_origin_orgs aoo WHERE aoo.act_id = na.id AND aoo.orgao_id = $${i}) OR na.orgao_origem_id = $${i})`,
+    );
+    i++;
+  }
 
   return {
     sql: parts.length ? ` AND ${parts.join(' AND ')}` : '',
@@ -80,7 +88,17 @@ export async function refreshSearchVector(prisma: PrismaService, actId: string) 
         SELECT string_agg(nu.texto, ' ')
         FROM normative_units nu
         WHERE nu.act_id = na.id
-      ), '')), 'D')
+      ), '')), 'D') ||
+      setweight(
+        to_tsvector('portuguese', coalesce(na.texto_identificado_importacao, '')),
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM normative_units nu
+            WHERE nu.act_id = na.id AND length(trim(nu.texto)) > 0
+          ) THEN 'C'
+          ELSE 'D'
+        END
+      )
     )
     WHERE na.id = $1
   `,

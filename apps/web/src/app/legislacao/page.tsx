@@ -9,7 +9,7 @@ import { MobileFilterDrawer } from '@/components/public/MobileFilterDrawer';
 import { PublicBottomNav } from '@/components/public/PublicBottomNav';
 import { PublicHeader } from '@/components/public/PublicHeader';
 import { SearchHero } from '@/components/public/SearchHero';
-import { getFilterCounts, searchActs } from '@/lib/api';
+import { getFilterCounts, getPublicOriginOrgs, searchActs } from '@/lib/api';
 
 export const metadata: Metadata = {
   title: 'Portal de Legislação — LeisMunicipais',
@@ -28,6 +28,7 @@ async function Results({
     assunto?: string;
     publicadoDe?: string;
     publicadoAte?: string;
+    orgaoOrigemId?: string;
     page?: string;
   }>;
 }) {
@@ -43,6 +44,7 @@ async function Results({
       assunto: sp.assunto,
       publicadoDe: sp.publicadoDe,
       publicadoAte: sp.publicadoAte,
+      orgaoOrigemId: sp.orgaoOrigemId,
       page: sp.page ? Number(sp.page) : 1,
     });
   } catch (err) {
@@ -110,14 +112,16 @@ export default async function LegislacaoPage({
     assunto?: string;
     publicadoDe?: string;
     publicadoAte?: string;
+    orgaoOrigemId?: string;
     page?: string;
   }>;
 }) {
   let counts: Awaited<ReturnType<typeof getFilterCounts>> | null = null;
+  let orgaos: Awaited<ReturnType<typeof getPublicOriginOrgs>> = [];
   let apiError: string | null = null;
 
   try {
-    counts = await getFilterCounts();
+    [counts, orgaos] = await Promise.all([getFilterCounts(), getPublicOriginOrgs()]);
   } catch (err) {
     apiError = err instanceof Error ? err.message : 'Erro ao conectar à API';
   }
@@ -151,12 +155,12 @@ export default async function LegislacaoPage({
         <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
           <div className="hidden lg:block">
             <Suspense>
-              <FilterSidebar counts={counts} />
+              <FilterSidebar initialCounts={counts} orgaos={orgaos} />
             </Suspense>
           </div>
           <div>
             <Suspense>
-              <MobileFilterDrawer counts={counts} />
+              <MobileFilterDrawer initialCounts={counts} orgaos={orgaos} />
             </Suspense>
             <Suspense
               fallback={

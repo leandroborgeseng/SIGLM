@@ -8,6 +8,10 @@ export interface DetectedActMetadata {
   ementa: string | null;
   tituloCompleto: string | null;
   confianca: number;
+  /** Título formal encontrado no cabeçalho, antes da ementa. */
+  titleFromHeader: boolean;
+  /** Confiança insuficiente para auto-preenchimento confiável. */
+  requerConferencia: boolean;
 }
 
 const TYPE_KEYWORDS: { tipo: string; pattern: RegExp }[] = [
@@ -23,7 +27,9 @@ const FULL_TITLE_RE =
   /\b(LEI\s+COMPLEMENTAR|INSTRU[ÇC][ÃA]O\s+NORMATIVA|LEI|DECRETO|PORTARIA|RESOLU[ÇC][ÃA]O)\s+N[º°oO.]?\s*([\d.]+)\s*,?\s*(?:DE\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç]+)\s+DE\s+(\d{4})|\/?\s*(\d{4}))?/i;
 
 const EMENTA_RE =
-  /(?:^|\n)\s*EMENTA\s*:?\s*(.+?)(?=\n\s*(?:Art(?:igo)?\.|§|T[IÍ]TULO|CAP[IÍ]TULO|CONSIDERANDO|Faço saber|$))/is;
+  /(?:^|\n)\s*EMENTA\s*:?\s*(.+?)(?=\n\s*(?:Art(?:igo)?\.|§|T[IÍ]TULO|CAP[IÍ]TULO|CONSIDERANDO|Faço saber|O\s+(?:PREFEITO|GOVERNADOR|SECRET[AÁ]RIO)|DECRETA\s*:|RESOLVE\s*:|$))/is;
+
+const LOW_CONFIDENCE_THRESHOLD = 55;
 
 const MONTHS: Record<string, number> = {
   janeiro: 1,
@@ -116,13 +122,72 @@ function extractFromFilename(filename: string): Partial<DetectedActMetadata> {
   return {};
 }
 
-function extractEmenta(text: string, blocos?: StructureBlock[]): string | null {
+/** Texto do cabeçalho antes da primeira ocorrência de EMENTA. */
+function preEmentaHeader(text: string): string {
+  const match = text.match(/(?:^|\n)\s*EMENTA\s*:?\s*/i);
+  if (match?.index != null) {
+    return text.slice(0, match.index);
+  }
+  return text.slice(0, 2500);
+}
+
+interface FormalTitleMatch {
+  match: RegExpMatchArray;
+  fromHeader: boolean;
+  lineIndex: number;
+  charIndex: number;
+}
+
+function extractFormalTitle(text: string): FormalTitleMatch | null {
+  const header = preEmentaHeader(text);
+  const lines = header.split(/\r?\n/);
+  let offset = 0;
+
+  for (let i = 0; i < Math.min(lines.length, 50); i++) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+    if (!line || line.length > 200) {
+      offset += rawLine.length + 1;
+      continue;
+    }
+    const m = line.match(FULL_TITLE_RE);
+    if (m && isFormalTitleLine(line)) {
+      return {
+        match: m,
+        fromHeader: true,
+        lineIndex: i,
+        charIndex: offset + rawLine.indexOf(m[0]),
+      };
+    }
+    offset += rawLine.length + 1;
+  }
+
+  return null;
+}
+
+function extractEmenta(
+  text: string,
+  afterCharIndex: number,
+  blocos?: StructureBlock[],
+): string | null {
   const fromBlock = blocos?.find((b) => b.tipo === 'ementa')?.texto?.trim();
   if (fromBlock) return fromBlock;
 
-  const match = text.match(EMENTA_RE);
+  const slice = text.slice(Math.max(0, afterCharIndex));
+  const match = slice.match(EMENTA_RE);
   if (match?.[1]) {
     return match[1].replace(/\s+/g, ' ').trim();
+  }
+
+  // Sem rótulo EMENTA: bloco entre título formal e preâmbulo/primeiro artigo
+  const betweenTitleAndBody = slice.match(
+    /^\s*\n\s*(.+?)(?=\n\s*(?:CONSIDERANDO|Faço saber|O\s+(?:PREFEITO|GOVERNADOR)|Art(?:igo)?\.\s*\d|DECRETA\s*:|RESOLVE\s*:))/is,
+  );
+  if (betweenTitleAndBody?.[1]) {
+    const candidate = betweenTitleAndBody[1].replace(/\s+/g, ' ').trim();
+    if (candidate.length >= 20 && candidate.length <= 2000 && !FULL_TITLE_RE.test(candidate)) {
+      return candidate;
+    }
   }
 
   return null;
@@ -139,9 +204,65 @@ function extractYear(header: string): number | null {
   return years[0] ?? null;
 }
 
+function applyFilenameSignals(
+  meta: Pick<DetectedActMetadata, 'tipo' | 'numero' | 'ano'>,
+  filename: string,
+): number {
+  const fromFile = extractFromFilename(filename);
+  if (!fromFile.tipo && fromFile.numero == null && fromFile.ano == null) return 0;
+
+  let delta = 0;
+  const hasMeta = Boolean(meta.tipo || meta.numero != null || meta.ano != null);
+
+  if (fromFile.tipo) {
+    if (!meta.tipo) {
+      meta.tipo = fromFile.tipo;
+      delta += 10;
+    } else if (meta.tipo === fromFile.tipo) {
+      delta += 8;
+    } else {
+      delta -= 18;
+    }
+  }
+
+  if (fromFile.numero != null) {
+    if (meta.numero == null) {
+      meta.numero = fromFile.numero;
+      delta += 10;
+    } else if (meta.numero === fromFile.numero) {
+      delta += 8;
+    } else {
+      delta -= 18;
+    }
+  }
+
+  if (fromFile.ano != null) {
+    if (meta.ano == null) {
+      meta.ano = fromFile.ano;
+      delta += 6;
+    } else if (meta.ano === fromFile.ano) {
+      delta += 6;
+    } else {
+      delta -= 12;
+    }
+  }
+
+  if (!hasMeta && (fromFile.tipo || fromFile.numero != null)) {
+    delta += 5;
+  }
+
+  return delta;
+}
+
 /** Detecta se a linha é só o título formal (não deve virar unidade estruturada). */
 export function isFormalTitleLine(line: string): boolean {
   return FULL_TITLE_RE.test(line.trim()) && line.trim().length < 180;
+}
+
+export function confidenceTier(confianca: number): 'alta' | 'media' | 'baixa' {
+  if (confianca >= 75) return 'alta';
+  if (confianca >= LOW_CONFIDENCE_THRESHOLD) return 'media';
+  return 'baixa';
 }
 
 export function extractActMetadata(
@@ -149,35 +270,41 @@ export function extractActMetadata(
   filename?: string,
   blocos?: StructureBlock[],
 ): DetectedActMetadata {
-  const header = text.slice(0, 2500);
+  const header = preEmentaHeader(text);
   let confianca = 0;
   let tipo: string | null = null;
   let numero: number | null = null;
   let ano: number | null = null;
   let dataAto: string | null = null;
   let tituloCompleto: string | null = null;
+  let titleFromHeader = false;
 
-  const ementa = extractEmenta(text, blocos);
-  if (ementa) confianca += 35;
+  const formal = extractFormalTitle(text);
+  let ementaSearchFrom = 0;
 
-  const titleMatch = header.match(FULL_TITLE_RE);
-  if (titleMatch) {
+  if (formal) {
+    const titleMatch = formal.match;
     tituloCompleto = titleMatch[0].replace(/\s+/g, ' ').trim();
     tipo = tipoFromKeyword(titleMatch[1]);
     numero = parseNumero(titleMatch[2]);
+    titleFromHeader = formal.fromHeader;
+    ementaSearchFrom = formal.charIndex + tituloCompleto.length;
+
     if (titleMatch[3] && titleMatch[4] && titleMatch[5]) {
       dataAto = parseDataExtenso(titleMatch[3], titleMatch[4], titleMatch[5]);
       ano = parseInt(titleMatch[5], 10);
-      confianca += 10;
+      confianca += formal.fromHeader ? 50 : 25;
     } else if (titleMatch[6]) {
       ano = parseInt(titleMatch[6], 10);
+      confianca += formal.fromHeader ? 40 : 20;
+    } else {
+      confianca += formal.fromHeader ? 35 : 15;
     }
-    confianca += 45;
   } else {
     for (const { tipo: t, pattern } of TYPE_KEYWORDS) {
       if (pattern.test(header)) {
         tipo = t;
-        confianca += 15;
+        confianca += 12;
         break;
       }
     }
@@ -187,7 +314,7 @@ export function extractActMetadata(
     );
     if (looseNum) {
       numero = parseNumero(looseNum[1]);
-      confianca += 20;
+      confianca += 15;
     }
   }
 
@@ -195,33 +322,46 @@ export function extractActMetadata(
     const year = extractYear(header);
     if (year) {
       ano = year;
-      confianca += 15;
+      confianca += 12;
     }
   }
 
+  const ementa = extractEmenta(text, ementaSearchFrom, blocos);
+  if (ementa) confianca += 30;
+
   if (filename) {
-    const fromFile = extractFromFilename(filename);
-    if (!tipo && fromFile.tipo) {
-      tipo = fromFile.tipo;
-      confianca += 12;
-    }
-    if (!numero && fromFile.numero) {
-      numero = fromFile.numero;
-      confianca += 12;
-    }
-    if (!ano && fromFile.ano) {
-      ano = fromFile.ano;
-      confianca += 8;
+    confianca += applyFilenameSignals({ tipo, numero, ano }, filename);
+  }
+
+  const finalConfianca = Math.max(0, Math.min(100, confianca));
+  const requerConferencia = finalConfianca < LOW_CONFIDENCE_THRESHOLD;
+
+  let finalTipo = tipo;
+  let finalNumero = numero;
+  let finalAno = ano;
+  let finalDataAto = dataAto;
+  let finalTitulo = tituloCompleto;
+
+  if (requerConferencia && !titleFromHeader) {
+    const fromFile = filename ? extractFromFilename(filename) : {};
+    finalTipo = fromFile.tipo ?? null;
+    finalNumero = fromFile.numero ?? null;
+    finalAno = fromFile.ano ?? null;
+    finalDataAto = null;
+    if (!fromFile.tipo && fromFile.numero == null) {
+      finalTitulo = null;
     }
   }
 
   return {
-    tipo,
-    numero,
-    ano,
-    dataAto,
+    tipo: finalTipo,
+    numero: finalNumero,
+    ano: finalAno,
+    dataAto: finalDataAto,
     ementa,
-    tituloCompleto,
-    confianca: Math.min(100, confianca),
+    tituloCompleto: finalTitulo,
+    confianca: finalConfianca,
+    titleFromHeader,
+    requerConferencia,
   };
 }

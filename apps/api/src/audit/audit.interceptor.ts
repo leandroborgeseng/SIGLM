@@ -47,6 +47,9 @@ export class AuditInterceptor implements NestInterceptor {
             path: req.url,
             method,
             body: sanitizeBody(req.body),
+            activeRoleId: req.user?.activeRoleId,
+            activeOrgaoId: req.user?.activeOrgaoId,
+            activeOrgaoAll: req.user?.activeOrgaoAll,
           } as Prisma.InputJsonValue,
         });
       }),
@@ -57,8 +60,15 @@ export class AuditInterceptor implements NestInterceptor {
 function sanitizeBody(body: unknown): unknown {
   if (!body || typeof body !== 'object') return body;
   const copy = { ...(body as Record<string, unknown>) };
-  if ('senha' in copy) copy.senha = '[redacted]';
-  if ('hashSenha' in copy) copy.hashSenha = '[redacted]';
-  if ('password' in copy) copy.password = '[redacted]';
+  for (const key of [
+    'senha',
+    'hashSenha',
+    'password',
+    'senhaAtual',
+    'novaSenha',
+    'confirmacaoSenha',
+  ]) {
+    if (key in copy) copy[key] = '[redacted]';
+  }
   return copy;
 }

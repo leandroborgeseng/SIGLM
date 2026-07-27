@@ -159,7 +159,10 @@ export class ExportService {
         ? `/public/attachments/${arquivoPublicacao.id}/file`
         : null,
       signatarios,
-      codigo: formatActCode(act.tipo, act.numero, act.ano),
+      codigo: formatActCode(act.tipo, act.numero, act.ano, {
+        atoConjunto,
+        prefixo: resolveTituloPrefixo(prefixoTituloModo, prefixoTitulo, orgaosOrigem),
+      }),
       units: units.map((u) => ({
         tipoUnidade: u.tipoUnidade,
         identificacao: u.identificacao,
@@ -263,7 +266,7 @@ export class ExportService {
         : unitHtmlToPlainText(act.ementa);
       doc.font('serif').fontSize(11).fillColor('#0F1B2D').text(ementaText, ementaX, ementaY, {
         width: ementaWidth,
-        align: 'left',
+        align: 'justify',
       });
       doc.x = doc.page.margins.left;
       doc.moveDown(1);

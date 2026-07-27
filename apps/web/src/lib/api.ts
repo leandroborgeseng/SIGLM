@@ -1,7 +1,9 @@
 import type {
   ActDetail,
+  AdminActDetail,
   AdminListResponse,
   FilterCounts,
+  PublicOriginOrgOption,
   SearchResponse,
 } from './types';
 import { getApiBaseUrl } from './api-url';
@@ -53,6 +55,7 @@ export function searchActs(params: {
   assunto?: string;
   publicadoDe?: string;
   publicadoAte?: string;
+  orgaoOrigemId?: string;
   page?: number;
 }) {
   const qs = new URLSearchParams();
@@ -64,12 +67,36 @@ export function searchActs(params: {
   if (params.assunto) qs.set('assunto', params.assunto);
   if (params.publicadoDe) qs.set('publicadoDe', params.publicadoDe);
   if (params.publicadoAte) qs.set('publicadoAte', params.publicadoAte);
+  if (params.orgaoOrigemId) qs.set('orgaoOrigemId', params.orgaoOrigemId);
   if (params.page) qs.set('page', String(params.page));
   return fetchApi<SearchResponse>(`/public/acts?${qs}`);
 }
 
-export function getFilterCounts() {
-  return fetchApi<FilterCounts>('/public/acts/filters');
+export function getFilterCounts(params?: {
+  tipo?: string;
+  situacao?: string;
+  ano?: string;
+  numero?: string;
+  assunto?: string;
+  publicadoDe?: string;
+  publicadoAte?: string;
+  orgaoOrigemId?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.tipo) qs.set('tipo', params.tipo);
+  if (params?.situacao) qs.set('situacao', params.situacao);
+  if (params?.ano) qs.set('ano', params.ano);
+  if (params?.numero) qs.set('numero', params.numero);
+  if (params?.assunto) qs.set('assunto', params.assunto);
+  if (params?.publicadoDe) qs.set('publicadoDe', params.publicadoDe);
+  if (params?.publicadoAte) qs.set('publicadoAte', params.publicadoAte);
+  if (params?.orgaoOrigemId) qs.set('orgaoOrigemId', params.orgaoOrigemId);
+  const q = qs.toString();
+  return fetchApi<FilterCounts>(`/public/acts/filters${q ? `?${q}` : ''}`);
+}
+
+export function getPublicOriginOrgs() {
+  return fetchApi<PublicOriginOrgOption[]>('/public/acts/filters/orgaos');
 }
 
 export function getActBySlug(tipo: string, ano: string, numero: string) {
@@ -106,7 +133,7 @@ export function getAdminActs(
 }
 
 export function getAdminAct(id: string, token?: string) {
-  return fetchApi<ActDetail>(`/admin/acts/${id}`, {
+  return fetchApi<AdminActDetail>(`/admin/acts/${id}`, {
     headers: authHeaders(token),
   });
 }

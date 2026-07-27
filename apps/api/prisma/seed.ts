@@ -26,6 +26,7 @@ const PERMISSIONS = [
   'audit:read',
   'acts:version',
   'acts:history',
+  'orgs:all',
 ] as const;
 
 const ROLES: Record<string, { descricao: string; permissions: string[] }> = {
@@ -100,6 +101,9 @@ async function seedRolesAndUsers() {
       email: 'admin@franca.sp.gov.br',
       hashSenha,
       roleId: adminRole.id,
+      roleLinks: {
+        create: { roleId: adminRole.id, isPrimary: true },
+      },
     },
   });
 
@@ -454,7 +458,17 @@ async function seedSearchVectors() {
         SELECT string_agg(nu.texto, ' ')
         FROM normative_units nu
         WHERE nu.act_id = na.id
-      ), '')), 'D')
+      ), '')), 'D') ||
+      setweight(
+        to_tsvector('portuguese', coalesce(na.texto_identificado_importacao, '')),
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM normative_units nu
+            WHERE nu.act_id = na.id AND length(trim(nu.texto)) > 0
+          ) THEN 'C'
+          ELSE 'D'
+        END
+      )
     );
   `);
 }

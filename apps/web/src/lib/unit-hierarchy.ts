@@ -421,8 +421,15 @@ export function getParentOptions(
   units: NormativeUnit[],
   excludeId?: string,
 ): ParentOptionGroups {
-  if (isTextGroupType(tipo)) return { recommended: [], others: [] };
+  // Ementa permanece sempre em nível superior.
+  if (tipo === 'ementa') return { recommended: [], others: [] };
+
   const candidates = units.filter((u) => u.id !== excludeId);
+  // Preâmbulo e Texto simples: todos os elementos como candidatos (sem recomendação rígida).
+  if (tipo === 'preambulo' || tipo === 'texto_simples' || tipo === 'considerando') {
+    return { recommended: [], others: candidates };
+  }
+
   const recommendedTypes = RECOMMENDED_PARENTS[tipo] ?? [];
   const recommended = candidates.filter((u) => recommendedTypes.includes(u.tipoUnidade));
   const others = candidates.filter((u) => !recommendedTypes.includes(u.tipoUnidade));

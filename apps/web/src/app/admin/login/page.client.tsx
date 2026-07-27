@@ -26,7 +26,11 @@ export default function AdminLoginPage() {
       const data = await login(email, password);
       setAuthCookies(data.accessToken, data.refreshToken);
       const from = searchParams.get('from') ?? '/admin/atos';
-      router.push(from);
+      if (data.user.mustChangePassword) {
+        router.push(`/admin/alterar-senha?from=${encodeURIComponent(from)}`);
+      } else {
+        router.push(from);
+      }
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'E-mail ou senha incorretos.');
