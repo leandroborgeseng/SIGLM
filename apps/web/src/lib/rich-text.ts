@@ -147,6 +147,7 @@ export function formatacaoClassNames(fmt: UnitFormatacao | null | undefined): st
   if (fmt.bold) classes.push('font-bold');
   if (fmt.italic) classes.push('italic');
   if (fmt.underline) classes.push('underline');
-  if (fmt.letterSpacing === 'expanded') classes.push('tracking-[0.28em]');
+  // Expanded letter-spacing is softer on mobile to avoid horizontal overflow.
+  if (fmt.letterSpacing === 'expanded') classes.push('tracking-[0.12em] sm:tracking-[0.28em]');
   return classes.join(' ');
 }

@@ -232,7 +232,10 @@ export function unitIndentPx(unit: NormativeUnit, units: NormativeUnit[]): numbe
   return Math.min(unitParentDepth(unit, units), 12) * 16;
 }
 
-/** @deprecated Prefer unitIndentPx — mantido para a consulta pública. */
+/**
+ * Indentação tipográfica na consulta pública.
+ * No mobile usa margens menores para não estourar a largura da tela.
+ */
 export function unitIndentClass(tipo: UnitType): string {
   if (isStructuralType(tipo)) return 'ml-0';
   switch (tipo) {
@@ -240,13 +243,13 @@ export function unitIndentClass(tipo: UnitType): string {
       return 'ml-0';
     case 'paragrafo_unico':
     case 'paragrafo':
-      return 'ml-4';
+      return 'ml-2 sm:ml-4';
     case 'inciso':
-      return 'ml-8';
+      return 'ml-3 sm:ml-8';
     case 'alinea':
-      return 'ml-12';
+      return 'ml-4 sm:ml-12';
     case 'item':
-      return 'ml-16';
+      return 'ml-5 sm:ml-16';
     default:
       return 'ml-0';
   }

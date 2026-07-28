@@ -16,25 +16,25 @@ export function PublicBottomNav() {
 
   return (
     <nav
-      className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur lg:hidden"
+      className="no-print fixed bottom-0 left-0 right-0 z-40 w-full max-w-[100vw] overflow-hidden border-t border-line bg-surface/95 backdrop-blur lg:hidden"
       aria-label="Navegação principal"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <ul className="mx-auto flex max-w-lg">
+      <ul className="mx-auto flex w-full max-w-lg">
         {ITEMS.map(({ href, label, icon: Icon, match }) => {
           const active = match(pathname);
           return (
-            <li key={href} className="flex-1">
+            <li key={href} className="min-w-0 flex-1">
               <Link
                 href={href}
                 className={cn(
-                  'touch-target flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition-colors',
+                  'touch-target flex w-full flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition-colors',
                   active ? 'text-brand' : 'text-ink-3',
                 )}
                 aria-current={active ? 'page' : undefined}
               >
-                <Icon className="h-5 w-5" aria-hidden="true" />
-                {label}
+                <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                <span className="truncate">{label}</span>
               </Link>
             </li>
           );

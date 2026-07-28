@@ -104,7 +104,7 @@ function SupplementLink({ item }: { item: ActAttachment }) {
   return (
     <a
       href={href}
-      className="text-[14.5px] text-[#0066cc] underline hover:opacity-90"
+      className="inline max-w-full break-all text-[14.5px] text-[#0066cc] underline hover:opacity-90 [overflow-wrap:anywhere]"
       target="_blank"
       rel="noopener noreferrer"
     >
@@ -130,7 +130,7 @@ function RichHtml({ html, className }: { html: string; className?: string }) {
   return (
     <span
       className={cn(
-        '[&_a]:text-[#0066cc] [&_a]:underline hover:[&_a]:opacity-90',
+        'break-words [overflow-wrap:anywhere] [&_a]:break-all [&_a]:text-[#0066cc] [&_a]:underline hover:[&_a]:opacity-90',
         className,
       )}
       dangerouslySetInnerHTML={{ __html: safe }}
@@ -183,9 +183,9 @@ function UnitBlock({
     return (
       <article
         id={anchorId}
-        className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] text-left sm:w-[min(100%,50%)]"
+        className="mb-5 ml-auto w-full min-w-0 max-w-[min(100%,36rem)] text-left sm:w-[min(100%,50%)]"
       >
-        <p className="text-justify text-[14.5px] leading-relaxed text-ink">
+        <p className="break-words text-justify text-[14.5px] leading-relaxed text-ink [overflow-wrap:anywhere]">
           <RichHtml html={texto} />
         </p>
         {mode === 'consolidado' && unit.nota && (
@@ -200,10 +200,10 @@ function UnitBlock({
 
   if (isSimple) {
     return (
-      <article id={anchorId} className={cn('mb-4', indent)}>
+      <article id={anchorId} className={cn('mb-4 min-w-0 max-w-full', indent)}>
         <p
           className={cn(
-            'text-[15px] leading-[1.75] text-ink',
+            'break-words text-[15px] leading-[1.75] text-ink [overflow-wrap:anywhere]',
             formatacaoClassNames(unit.formatacao),
           )}
         >
@@ -215,7 +215,10 @@ function UnitBlock({
 
   if (isPreamble) {
     return (
-      <article id={anchorId} className="mb-6 text-[15px] leading-[1.75] text-ink text-justify">
+      <article
+        id={anchorId}
+        className="mb-6 min-w-0 max-w-full break-words text-justify text-[15px] leading-[1.75] text-ink [overflow-wrap:anywhere]"
+      >
         <p>
           <RichHtml html={texto} />
         </p>
@@ -231,8 +234,8 @@ function UnitBlock({
 
   if (isStructural) {
     return (
-      <article id={anchorId} className={cn('mb-5', indent)}>
-        <h3 className="text-center text-[15px] font-semibold uppercase tracking-wide text-ink">
+      <article id={anchorId} className={cn('mb-5 min-w-0 max-w-full', indent)}>
+        <h3 className="break-words text-center text-[15px] font-semibold uppercase tracking-wide text-ink [overflow-wrap:anywhere]">
           {unit.identificacao && <span className="block">{unit.identificacao}</span>}
           <RichHtml html={texto} />
         </h3>
@@ -259,9 +262,13 @@ function UnitBlock({
   return (
     <article
       id={anchorId}
-      className={cn('mb-4', indent, isRevoked && mode === 'consolidado' && 'opacity-80')}
+      className={cn(
+        'mb-4 min-w-0 max-w-full',
+        indent,
+        isRevoked && mode === 'consolidado' && 'opacity-80',
+      )}
     >
-      <p className="text-justify text-[15px] leading-[1.75] text-ink">
+      <p className="break-words text-justify text-[15px] leading-[1.75] text-ink [overflow-wrap:anywhere]">
         {showLabel && label && (
           <strong
             className={cn(
@@ -410,27 +417,29 @@ export function ActContent({ act }: { act: ActDetail }) {
   })();
 
   return (
-    <div className="bg-white text-ink">
+    <div className="min-w-0 max-w-full overflow-x-hidden bg-white text-ink">
       {/* Auxiliares de navegação — fora do texto oficial */}
       <div className="no-print mb-6 space-y-3 border-b border-line/60 pb-4">
-        <p className="text-center text-[12px] text-ink-3 sm:text-left">
-          {act.codigo}
-          <span className="mx-1.5">·</span>
-          {act.situacao.replace(/_/g, ' ')}
+        <p className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-center text-[12px] text-ink-3 sm:justify-start sm:text-left">
+          <span>{act.codigo}</span>
+          <span aria-hidden="true">·</span>
+          <span>{act.situacao.replace(/_/g, ' ')}</span>
           {orgaos.length > 0 ? (
             <>
-              <span className="mx-1.5">·</span>
-              {orgaos.join(' / ')}
+              <span aria-hidden="true">·</span>
+              <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+                {orgaos.join(' / ')}
+              </span>
             </>
           ) : null}
-          <span className="mx-1.5">·</span>
-          Ato: {formatDate(act.dataAto)}
-          <span className="mx-1.5">·</span>
-          Pub.: {formatDate(act.dataPublicacao)}
+          <span aria-hidden="true">·</span>
+          <span>Ato: {formatDate(act.dataAto)}</span>
+          <span aria-hidden="true">·</span>
+          <span>Pub.: {formatDate(act.dataPublicacao)}</span>
         </p>
 
         {!fileOnlyPublic && tab !== 'historico' && tocUnits.length > 0 && (
-          <div>
+          <div className="min-w-0">
             <button
               type="button"
               onClick={() => setTocOpen((v) => !v)}
@@ -445,18 +454,23 @@ export function ActContent({ act }: { act: ActDetail }) {
             </button>
             {tocOpen && (
               <nav
-                className="mt-3 max-h-[min(40vh,280px)] overflow-y-auto overscroll-contain rounded-[10px] border border-line/70 bg-surface-2/40 py-2 pr-1 sm:max-h-[min(36vh,320px)]"
+                className="mt-3 max-h-[min(40vh,280px)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[10px] border border-line/70 bg-surface-2/40 py-2 pr-1 sm:max-h-[min(36vh,320px)]"
                 aria-label="Sumário do ato"
               >
-                <ul className="space-y-0.5">
+                <ul className="min-w-0 space-y-0.5">
                   {tocUnits.map((u) => {
                     const depth = unitTocDepth(u, displayUnits);
                     return (
-                      <li key={u.id} style={{ paddingLeft: `${depth * 12}px` }}>
+                      <li
+                        key={u.id}
+                        className="min-w-0"
+                        style={{ paddingLeft: `${Math.min(depth, 4) * 10}px` }}
+                      >
                         <a
                           href={`#${unitAnchorId(u)}`}
-                          className="block rounded px-2 py-1 text-[13.5px] text-brand hover:bg-brand/5 hover:underline"
+                          className="block truncate rounded px-2 py-1 text-[13.5px] text-brand hover:bg-brand/5 hover:underline"
                           onClick={() => setTocOpen(false)}
+                          title={unitTocLabel(u)}
                         >
                           {unitTocLabel(u)}
                         </a>
@@ -470,17 +484,17 @@ export function ActContent({ act }: { act: ActDetail }) {
         )}
       </div>
 
-      <header className="mb-8">
+      <header className="mb-8 min-w-0 max-w-full">
         <div className="mb-6 flex flex-col items-center gap-3 text-center sm:flex-row sm:items-center sm:justify-center sm:gap-4 sm:text-left">
           <FrancaBrasao size={78} priority />
-          <div className="min-w-0 leading-snug">
-            <p className="text-[14px] font-semibold tracking-wide text-ink sm:text-[15px]">
+          <div className="min-w-0 max-w-full leading-snug">
+            <p className="break-words text-[14px] font-semibold tracking-wide text-ink sm:text-[15px]">
               Prefeitura Municipal de Franca/SP
             </p>
             {orgaos.map((nome) => (
               <p
                 key={nome}
-                className="mt-0.5 text-[12.5px] font-medium text-ink-2 sm:text-[13px]"
+                className="mt-0.5 break-words text-[12.5px] font-medium text-ink-2 [overflow-wrap:anywhere] sm:text-[13px]"
               >
                 {nome}
               </p>
@@ -488,22 +502,22 @@ export function ActContent({ act }: { act: ActDetail }) {
           </div>
         </div>
 
-        <h1 className="mb-4 text-center text-[17px] font-bold uppercase leading-snug tracking-wide text-ink sm:text-[18px]">
+        <h1 className="mb-4 break-words text-center text-[17px] font-bold uppercase leading-snug tracking-wide text-ink [overflow-wrap:anywhere] sm:text-[18px]">
           {tituloFormal}
         </h1>
 
         {tab !== 'historico' && ementaUnit ? (
           <UnitBlock unit={ementaUnit} mode={tab} />
         ) : tab !== 'historico' && act.ementa ? (
-          <p className="mb-5 ml-auto w-full max-w-[min(100%,36rem)] text-justify text-[14.5px] leading-relaxed text-ink sm:w-[min(100%,50%)]">
+          <p className="mb-5 ml-auto w-full min-w-0 max-w-[min(100%,36rem)] break-words text-justify text-[14.5px] leading-relaxed text-ink [overflow-wrap:anywhere] sm:w-[min(100%,50%)]">
             <RichHtml html={act.ementa} />
           </p>
         ) : null}
 
         {(act.anexosTopo?.length ?? 0) > 0 && (
-          <ul className="mt-5 space-y-1.5 border-t border-line/50 pt-4">
+          <ul className="mt-5 min-w-0 space-y-1.5 border-t border-line/50 pt-4">
             {act.anexosTopo!.map((item) => (
-              <li key={item.id}>
+              <li key={item.id} className="min-w-0">
                 <SupplementLink item={item} />
               </li>
             ))}
@@ -535,7 +549,7 @@ export function ActContent({ act }: { act: ActDetail }) {
           )}
         </section>
       ) : (
-        <div className="min-w-0">
+        <div className="min-w-0 max-w-full overflow-x-auto">
           {tab === 'historico' ? (
             <ol className="relative space-y-5 border-l border-line pl-5">
               <li>

@@ -431,32 +431,126 @@ export class NormativeActsService {
   }
 
   async getFilterCounts(query: Partial<SearchActsQuery> = {}) {
-    const [byTipo, bySituacao, byAno, total] = await Promise.all([
+    const term = query.q ? normalizeSearchTerm(query.q) : '';
+    let textIds: string[] | undefined;
+    if (term) {
+      textIds = await this.publicTextMatchIds(term);
+      if (textIds.length === 0) {
+        return { total: 0, tipos: {}, situacoes: {}, anos: {}, orgaos: [] };
+      }
+    }
+
+    const where = (omit: (keyof SearchActsQuery)[] = []) => {
+      const base = buildPublicActWhere(query, omit);
+      if (!textIds) return base;
+      return { AND: [base, { id: { in: textIds } }] };
+    };
+
+    const [byTipo, bySituacao, byAno, total, orgLinks, legacyOrgs] = await Promise.all([
       this.prisma.normativeAct.groupBy({
         by: ['tipo'],
-        where: buildPublicActWhere(query, ['tipo']),
+        where: where(['tipo']),
         _count: true,
       }),
       this.prisma.normativeAct.groupBy({
         by: ['situacao'],
-        where: buildPublicActWhere(query, ['situacao']),
+        where: where(['situacao']),
         _count: true,
       }),
       this.prisma.normativeAct.groupBy({
         by: ['ano'],
-        where: buildPublicActWhere(query, ['ano']),
+        where: where(['ano']),
         _count: true,
         orderBy: { ano: 'desc' },
       }),
-      this.prisma.normativeAct.count({ where: buildPublicActWhere(query) }),
+      this.prisma.normativeAct.count({ where: where() }),
+      this.prisma.actOriginOrg.groupBy({
+        by: ['orgaoId'],
+        where: { act: where(['orgaoOrigemId']) },
+        _count: { _all: true },
+      }),
+      this.prisma.normativeAct.groupBy({
+        by: ['orgaoOrigemId'],
+        where: {
+          AND: [
+            where(['orgaoOrigemId']),
+            { orgaoOrigemId: { not: null } },
+            { originOrgs: { none: {} } },
+          ],
+        },
+        _count: { _all: true },
+      }),
     ]);
+
+    const orgCounts = new Map<string, number>();
+    for (const row of orgLinks) {
+      orgCounts.set(row.orgaoId, (orgCounts.get(row.orgaoId) ?? 0) + row._count._all);
+    }
+    for (const row of legacyOrgs) {
+      if (!row.orgaoOrigemId) continue;
+      orgCounts.set(
+        row.orgaoOrigemId,
+        (orgCounts.get(row.orgaoOrigemId) ?? 0) + row._count._all,
+      );
+    }
+
+    const orgIds = [...orgCounts.keys()];
+    const orgRows =
+      orgIds.length > 0
+        ? await this.prisma.originOrg.findMany({
+            where: { id: { in: orgIds } },
+            orderBy: { nome: 'asc' },
+          })
+        : [];
 
     return {
       total,
       tipos: Object.fromEntries(byTipo.map((r) => [r.tipo, r._count])),
       situacoes: Object.fromEntries(bySituacao.map((r) => [r.situacao, r._count])),
       anos: Object.fromEntries(byAno.map((r) => [String(r.ano), r._count])),
+      orgaos: orgRows.map((o) => ({
+        id: o.id,
+        nome: o.nome,
+        sigla: o.sigla,
+        count: orgCounts.get(o.id) ?? 0,
+      })),
     };
+  }
+
+  /** IDs de atos públicos que batem com a busca textual (FTS + número). */
+  private async publicTextMatchIds(term: string): Promise<string[]> {
+    const numero = parseNumeroSearch(term);
+    const params: unknown[] = [term];
+    let searchSql = `(na.search_vector @@ websearch_to_tsquery('portuguese', $1)`;
+    if (numero !== null) {
+      params.push(numero);
+      searchSql += ` OR na.numero = $2`;
+    }
+    searchSql += ')';
+
+    try {
+      const rows = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT na.id FROM normative_acts na
+         WHERE na.status_publicacao = 'publicado' AND ${searchSql}`,
+        ...params,
+      );
+      return rows.map((r) => r.id);
+    } catch {
+      const rows = await this.prisma.normativeAct.findMany({
+        where: {
+          statusPublicacao: PublicationStatus.publicado,
+          OR: [
+            { ementa: { contains: term, mode: 'insensitive' } },
+            { assunto: { contains: term, mode: 'insensitive' } },
+            { textoIdentificadoImportacao: { contains: term, mode: 'insensitive' } },
+            ...(numero !== null ? [{ numero }] : []),
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      return rows.map((r) => r.id);
+    }
   }
 
   async getPublicOriginOrgs() {

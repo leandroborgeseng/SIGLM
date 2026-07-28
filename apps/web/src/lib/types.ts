@@ -224,6 +224,12 @@ export interface FilterCounts {
   tipos: Record<string, number>;
   situacoes: Record<string, number>;
   anos: Record<string, number>;
+  orgaos?: Array<{
+    id: string;
+    nome: string;
+    sigla?: string | null;
+    count: number;
+  }>;
 }
 
 export interface PublicOriginOrgOption {

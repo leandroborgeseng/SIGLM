@@ -10,6 +10,7 @@ import type { FilterCounts, PublicOriginOrgOption } from '@/lib/types';
 
 function filterParamsFromSearchParams(params: URLSearchParams) {
   return {
+    q: params.get('q') ?? undefined,
     tipo: params.get('tipo') ?? undefined,
     situacao: params.get('situacao') ?? undefined,
     ano: params.get('ano') ?? undefined,
@@ -61,9 +62,37 @@ export function FilterSidebar({
     };
   }, [filterKey, initialCounts, params]);
 
-  const anos = Object.keys(counts.anos ?? {})
-    .map(Number)
-    .sort((a, b) => b - a);
+  const visibleTipos = useMemo(
+    () => ACT_TYPES.filter((t) => (counts.tipos[t] ?? 0) > 0 || tipo === t),
+    [counts.tipos, tipo],
+  );
+
+  const visibleSituacoes = useMemo(
+    () => SITUACOES.filter((s) => (counts.situacoes[s] ?? 0) > 0 || situacao === s),
+    [counts.situacoes, situacao],
+  );
+
+  const anos = useMemo(() => {
+    const set = new Set<number>();
+    for (const [key, count] of Object.entries(counts.anos ?? {})) {
+      const y = Number(key);
+      if (Number.isFinite(y) && count > 0) set.add(y);
+    }
+    if (ano) {
+      const y = Number(ano);
+      if (Number.isFinite(y)) set.add(y);
+    }
+    return [...set].sort((a, b) => b - a);
+  }, [counts.anos, ano]);
+
+  const facetOrgaos = useMemo(() => {
+    if (counts.orgaos && counts.orgaos.length > 0) {
+      return counts.orgaos
+        .filter((o) => o.count > 0 || o.id === orgaoOrigemId)
+        .map((o) => ({ id: o.id, nome: o.nome, sigla: o.sigla, count: o.count }));
+    }
+    return orgaos.map((o) => ({ ...o, count: undefined as number | undefined }));
+  }, [counts.orgaos, orgaos, orgaoOrigemId]);
 
   const update = useCallback(
     (updates: Record<string, string | null>) => {
@@ -86,8 +115,13 @@ export function FilterSidebar({
       <div>
         <h2 className="text-section mb-3">Tipo do ato</h2>
         <div className="flex flex-col gap-2">
-          <Chip active={!tipo} label="Todos" count={counts.total} onClick={() => update({ tipo: null })} />
-          {ACT_TYPES.map((t) => (
+          <Chip
+            active={!tipo}
+            label="Todos"
+            count={counts.total}
+            onClick={() => update({ tipo: null })}
+          />
+          {visibleTipos.map((t) => (
             <Chip
               key={t}
               active={tipo === t}
@@ -108,7 +142,7 @@ export function FilterSidebar({
                 key={y}
                 active={ano === String(y)}
                 label={String(y)}
-                count={counts.anos?.[y] ?? 0}
+                count={counts.anos?.[String(y)] ?? 0}
                 onClick={() => update({ ano: ano === String(y) ? null : String(y) })}
               />
             ))}
@@ -124,7 +158,7 @@ export function FilterSidebar({
             count={counts.total}
             onClick={() => update({ situacao: null })}
           />
-          {SITUACOES.map((s) => (
+          {visibleSituacoes.map((s) => (
             <Chip
               key={s}
               active={situacao === s}
@@ -141,10 +175,14 @@ export function FilterSidebar({
         publicadoDe={publicadoDe}
         publicadoAte={publicadoAte}
         orgaoOrigemId={orgaoOrigemId}
-        orgaos={orgaos}
+        orgaos={facetOrgaos}
         onChange={update}
       />
-      {pending && <p className="text-[12px] text-ink-4" role="status">Atualizando...</p>}
+      {pending && (
+        <p className="text-[12px] text-ink-4" role="status">
+          Atualizando...
+        </p>
+      )}
     </aside>
   );
 }

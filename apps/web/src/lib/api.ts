@@ -73,6 +73,7 @@ export function searchActs(params: {
 }
 
 export function getFilterCounts(params?: {
+  q?: string;
   tipo?: string;
   situacao?: string;
   ano?: string;
@@ -83,6 +84,7 @@ export function getFilterCounts(params?: {
   orgaoOrigemId?: string;
 }) {
   const qs = new URLSearchParams();
+  if (params?.q) qs.set('q', params.q);
   if (params?.tipo) qs.set('tipo', params.tipo);
   if (params?.situacao) qs.set('situacao', params.situacao);
   if (params?.ano) qs.set('ano', params.ano);

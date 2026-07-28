@@ -69,6 +69,7 @@ export class PublicActsController {
 
   @Get('public/acts/filters')
   filters(
+    @Query('q') q?: string,
     @Query('tipo') tipo?: ActType,
     @Query('situacao') situacao?: ActSituacao,
     @Query('ano') ano?: string,
@@ -79,6 +80,7 @@ export class PublicActsController {
     @Query('orgaoOrigemId') orgaoOrigemId?: string,
   ) {
     return this.acts.getFilterCounts({
+      q,
       tipo,
       situacao,
       ano: ano ? Number(ano) : undefined,

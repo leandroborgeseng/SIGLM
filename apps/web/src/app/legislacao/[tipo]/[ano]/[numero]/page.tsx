@@ -33,25 +33,26 @@ export default async function ActPage({ params }: Props) {
   }
 
   return (
-    <>
-      <div className="min-h-dvh bg-white pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
-        <div className="no-print border-b border-line/70 bg-white">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
-            <Link
-              href="/legislacao"
-              className="touch-target text-[13px] text-ink-3 hover:text-brand hover:underline"
-            >
-              ← Voltar à busca
-            </Link>
-            <ActActions tipo={tipo} ano={ano} numero={numero} />
-          </div>
+    <div className="min-h-dvh max-w-full overflow-x-hidden bg-white pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <div className="no-print border-b border-line/70 bg-white">
+        <div className="mx-auto flex max-w-5xl min-w-0 flex-wrap items-center justify-between gap-2 px-4 py-2.5 sm:gap-3 sm:px-6">
+          <Link
+            href="/legislacao"
+            className="touch-target shrink-0 text-[13px] text-ink-3 hover:text-brand hover:underline"
+          >
+            ← Voltar à busca
+          </Link>
+          <ActActions tipo={tipo} ano={ano} numero={numero} />
         </div>
-
-        <main id="main-content" className="mx-auto max-w-5xl px-4 py-8 sm:px-8 lg:px-10">
-          <ActContent act={act} />
-        </main>
-        <PublicBottomNav />
       </div>
-    </>
+
+      <main
+        id="main-content"
+        className="mx-auto min-w-0 max-w-5xl px-4 py-8 sm:px-6 lg:px-10"
+      >
+        <ActContent act={act} />
+      </main>
+      <PublicBottomNav />
+    </div>
   );
 }

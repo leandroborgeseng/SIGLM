@@ -5,6 +5,8 @@ import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { formatOriginOrgLabel } from '@/lib/format';
 import type { PublicOriginOrgOption } from '@/lib/types';
 
+type OrgOption = PublicOriginOrgOption & { count?: number };
+
 export function AdvancedFilters({
   numero,
   assunto,
@@ -19,12 +21,15 @@ export function AdvancedFilters({
   publicadoDe: string;
   publicadoAte: string;
   orgaoOrigemId: string;
-  orgaos: PublicOriginOrgOption[];
+  orgaos: OrgOption[];
   onChange: (updates: Record<string, string | null>) => void;
 }) {
   const orgOptions = orgaos.map((o) => ({
     value: o.id,
-    label: formatOriginOrgLabel(o),
+    label:
+      o.count != null
+        ? `${formatOriginOrgLabel(o)} (${o.count})`
+        : formatOriginOrgLabel(o),
     searchText: `${o.sigla ?? ''} ${o.nome}`.trim(),
   }));
 
