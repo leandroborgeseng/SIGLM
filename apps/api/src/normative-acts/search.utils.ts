@@ -95,8 +95,8 @@ export async function refreshSearchVector(prisma: PrismaService, actId: string) 
           WHEN EXISTS (
             SELECT 1 FROM normative_units nu
             WHERE nu.act_id = na.id AND length(trim(nu.texto)) > 0
-          ) THEN 'C'
-          ELSE 'D'
+          ) THEN 'C'::"char"
+          ELSE 'D'::"char"
         END
       )
     )

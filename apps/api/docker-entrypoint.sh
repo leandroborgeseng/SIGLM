@@ -41,15 +41,30 @@ fi
 
 echo "Aplicando migrations (prisma migrate deploy)..."
 i=0
-until "$PRISMA_BIN" migrate deploy; do
+RESOLVED_FAILED_MIGRATION=0
+until migrate_out="$("$PRISMA_BIN" migrate deploy 2>&1)"; do
+  ec=$?
+  printf '%s\n' "$migrate_out"
   i=$((i + 1))
   if [ "$i" -ge 30 ]; then
     echo "ERRO: prisma migrate deploy falhou após 30 tentativas."
     exit 1
   fi
+  # P3009: migration marcada como failed no banco. A 20260727230000 falhou no UPDATE
+  # (setweight/CASE) após criar enum/colunas — marcar rolled-back e reaplicar SQL corrigido.
+  if [ "$RESOLVED_FAILED_MIGRATION" -eq 0 ] \
+    && printf '%s' "$migrate_out" | grep -q 'P3009' \
+    && printf '%s' "$migrate_out" | grep -q '20260727230000_identified_import_text'; then
+    echo "Detectado P3009 em 20260727230000_identified_import_text — resolve --rolled-back e reaplica..."
+    "$PRISMA_BIN" migrate resolve --rolled-back 20260727230000_identified_import_text || true
+    RESOLVED_FAILED_MIGRATION=1
+    sleep 1
+    continue
+  fi
   echo "Banco ainda não pronto ou migrate falhou; nova tentativa em 2s ($i/30)..."
   sleep 2
 done
+printf '%s\n' "$migrate_out"
 echo "Migrations aplicadas."
 
 if [ "$RUN_SEED" = "true" ]; then
