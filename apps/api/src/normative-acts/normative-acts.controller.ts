@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ActSituacao, ActType, EditorialStage, PublicationStatus } from '@prisma/client';
-import { Public, RequirePermissions } from '../auth/auth.constants';
+import { Public, RequireAnyPermission, RequirePermissions } from '../auth/auth.constants';
 import type { AuthUser } from '../auth/auth.constants';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -256,13 +256,13 @@ export class AdminActsController {
   }
 
   @Post(':id/approve-review')
-  @RequirePermissions('acts:write')
+  @RequireAnyPermission('acts:write', 'acts:publish')
   approveReview(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.acts.approveReview(id, user);
   }
 
   @Post(':id/return-to-structuring')
-  @RequirePermissions('acts:write')
+  @RequireAnyPermission('acts:write', 'acts:publish')
   returnToStructuring(
     @Param('id') id: string,
     @Body() dto: ReturnToStructuringDto,
@@ -300,13 +300,13 @@ export class AdminActsController {
     @Body() dto: UpdateIdentifiedImportTextDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.acts.updateIdentifiedImportText(id, dto, user.id);
+    return this.acts.updateIdentifiedImportText(id, dto, user);
   }
 
   @Post(':id/identify-text-from-original')
   @RequirePermissions('acts:write')
   identifyTextFromOriginal(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.acts.identifyTextFromOriginal(id, user.id);
+    return this.acts.identifyTextFromOriginal(id, user);
   }
 
   @Post(':id/publish')

@@ -58,6 +58,7 @@ import {
   diffSnapshots,
   recordInternalHistory,
   actHasPendingStructuralChanges,
+  hasStructuralDiff,
   type ActSnapshot,
 } from './act-versioning.utils';
 import { defaultIdentificacao, validateUnitsHierarchy } from './unit-hierarchy.utils';
@@ -1705,7 +1706,7 @@ export class NormativeActsService {
         ...(dto.ementa !== undefined && { ementa: dto.ementa }),
         ...(dto.assunto !== undefined && { assunto: dto.assunto }),
         ...(dto.situacao !== undefined && { situacao: dto.situacao }),
-        ...(dto.etapaEditorial !== undefined && { etapaEditorial: dto.etapaEditorial }),
+        // etapaEditorial só via fluxo Encaminhar/Concluir/Devolver/Publicar (item 85)
         ...(dataAto !== undefined && { dataAto }),
         ...(nextAno !== existing.ano && { ano: nextAno }),
         ...(nextSlug && { slug: nextSlug }),
@@ -2198,13 +2199,20 @@ export class NormativeActsService {
       throw new BadRequestException('Só é possível devolver atos em “Aguardando revisão”');
     }
     const motivo = justificativa?.trim();
-    if (!motivo) {
-      throw new BadRequestException('Informe a justificativa da devolução para estruturação');
+    if (!motivo || motivo.length < 3) {
+      throw new BadRequestException(
+        'Informe a justificativa da devolução para estruturação (mínimo 3 caracteres)',
+      );
     }
 
     await this.prisma.normativeAct.update({
       where: { id },
-      data: { etapaEditorial: EditorialStage.em_estruturacao },
+      data: {
+        etapaEditorial: EditorialStage.em_estruturacao,
+        ...(!act.editionOpen && act.statusPublicacao === PublicationStatus.em_revisao
+          ? { statusPublicacao: PublicationStatus.rascunho }
+          : {}),
+      },
     });
 
     await recordInternalHistory(this.prisma, {
@@ -2625,7 +2633,7 @@ export class NormativeActsService {
         : undefined;
 
     return {
-      act: await this.getAdminById(actId),
+      act: await this.getAdminById(actId, user),
       elementCount,
       replaced: hasUnits,
       usedOcr,
@@ -2756,23 +2764,37 @@ export class NormativeActsService {
   }
 
   /**
-   * Após alteração estrutural: se já estava revisado (ou publicado estruturado em edição),
-   * volta para “Em estruturação” e exige novo encaminhamento. Em “Aguardando revisão” permanece
-   * (correções do revisor).
+   * Após alteração estrutural efetiva: se já estava revisado (ou estruturado em edição),
+   * volta para “Em estruturação”. Em “Aguardando revisão” permanece (correções do revisor).
+   * Save idempotente (mesmo conteúdo) não rebaixa o estágio.
    */
   private async demoteAfterStructuralEdit(actId: string, etapa: EditorialStage) {
-    if (
-      etapa === EditorialStage.revisado ||
-      etapa === EditorialStage.estruturado
-    ) {
-      await this.prisma.normativeAct.update({
-        where: { id: actId },
-        data: { etapaEditorial: EditorialStage.em_estruturacao },
+    if (etapa === EditorialStage.revisado) {
+      const lastApprove = await this.prisma.actInternalHistory.findFirst({
+        where: { actId, acao: 'aprovar_revisao' },
+        orderBy: { createdAt: 'desc' },
+        select: { snapshot: true },
       });
+      if (!lastApprove?.snapshot) return;
+      const current = await buildActSnapshot(this.prisma, actId);
+      if (!hasStructuralDiff(lastApprove.snapshot as unknown as ActSnapshot, current)) {
+        return;
+      }
+    } else if (etapa === EditorialStage.estruturado) {
+      const changed = await actHasPendingStructuralChanges(this.prisma, actId);
+      if (!changed) return;
+    } else {
+      return;
     }
+
+    await this.prisma.normativeAct.update({
+      where: { id: actId },
+      data: { etapaEditorial: EditorialStage.em_estruturacao },
+    });
   }
 
   private responsaveisResumo(act: {
+
     responsavelEstruturacao?: { nome: string } | null;
     responsavelRevisao?: { nome: string } | null;
   }) {
@@ -3173,7 +3195,7 @@ export class NormativeActsService {
   async updateIdentifiedImportText(
     actId: string,
     dto: UpdateIdentifiedImportTextDto,
-    userId?: string,
+    user?: AuthUser,
   ) {
     const act = await this.ensureAct(actId);
     this.assertEditable(act);
@@ -3189,16 +3211,16 @@ export class NormativeActsService {
 
     await recordInternalHistory(this.prisma, {
       actId,
-      userId,
+      userId: user?.id,
       acao: 'editar_texto_identificado',
       resumo: 'Alterou o texto identificado na importação',
       withSnapshot: false,
     });
 
-    return this.getAdminById(actId);
+    return this.getAdminById(actId, user);
   }
 
-  async identifyTextFromOriginal(actId: string, userId?: string) {
+  async identifyTextFromOriginal(actId: string, user?: AuthUser) {
     const act = await this.ensureAct(actId);
     this.assertEditable(act);
 
@@ -3255,13 +3277,13 @@ export class NormativeActsService {
 
     await recordInternalHistory(this.prisma, {
       actId,
-      userId,
+      userId: user?.id,
       acao: 'identificar_texto_original',
       resumo: `Identificou texto do arquivo original (${nome})`,
       withSnapshot: false,
     });
 
-    return this.getAdminById(actId);
+    return this.getAdminById(actId, user);
   }
 
   private async createVersionForUnit(

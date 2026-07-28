@@ -419,7 +419,11 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   });
 
   const syncFromAct = (updated: EditorAct) => {
-    setAct(updated);
+    setAct((prev) => ({
+      ...updated,
+      // Preserva hints de acesso se a resposta não trouxer (ex.: endpoints legados).
+      access: updated.access ?? prev.access,
+    }));
     setUnits(updated.units);
     setAssunto(updated.assunto ?? '');
     setDataAto(toDateInputValue(updated.dataAto));
@@ -891,11 +895,11 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
 
   const handleReturnToStructuring = async () => {
     const justificativa = window.prompt(
-      'Justificativa da devolução para estruturação (obrigatória):',
+      'Justificativa da devolução para estruturação (obrigatória, mín. 3 caracteres):',
     );
     if (justificativa === null) return;
-    if (!justificativa.trim()) {
-      toast('Informe a justificativa da devolução', 'warn');
+    if (justificativa.trim().length < 3) {
+      toast('Informe uma justificativa com pelo menos 3 caracteres', 'warn');
       return;
     }
     setSaving(true);
@@ -912,11 +916,24 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   };
 
   const handlePublish = async () => {
+    const unitsDirty =
+      fingerprint(currentMeta()) !== savedFingerprint.current &&
+      JSON.stringify(unitsPayload(units)) !==
+        JSON.stringify(unitsPayload(act.units));
+    if (
+      (act.etapaEditorial === 'revisado' || act.etapaEditorial === 'aguardando_revisao') &&
+      unitsDirty
+    ) {
+      toast(
+        'Há alterações no Texto Estruturado não salvas. Salve-as antes de publicar (isso pode exigir nova revisão).',
+        'warn',
+      );
+      return;
+    }
     setSaving(true);
     try {
       if (editable && dirty) {
         await updateAct(act.id, metaPayload());
-        // Evita regravar units no estágio "revisado" (rebaixaria o fluxo sem necessidade).
         if (
           units.length > 0 &&
           act.etapaEditorial !== 'revisado' &&
@@ -1299,8 +1316,10 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
         </div>
       )}
       {access?.requiresReviewBeforePublish &&
-        act.etapaEditorial === 'em_estruturacao' &&
-        editable && (
+        !canPublish &&
+        editable &&
+        act.etapaEditorial !== 'aguardando_revisao' &&
+        act.etapaEditorial !== 'revisado' && (
           <div className="mx-6 mt-4 rounded-[10px] border border-warn/40 bg-warn/5 px-4 py-3 text-[13px] text-ink-2">
             Há alterações no Texto Estruturado. Encaminhe para revisão antes de publicar.
           </div>

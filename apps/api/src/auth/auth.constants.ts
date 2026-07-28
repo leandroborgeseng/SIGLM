@@ -7,6 +7,11 @@ export const PERMISSIONS_KEY = 'permissions';
 export const RequirePermissions = (...permissions: string[]) =>
   SetMetadata(PERMISSIONS_KEY, permissions);
 
+/** Exige ao menos uma das permissões (OR). */
+export const ANY_PERMISSIONS_KEY = 'any_permissions';
+export const RequireAnyPermission = (...permissions: string[]) =>
+  SetMetadata(ANY_PERMISSIONS_KEY, permissions);
+
 export const SKIP_MUST_CHANGE_PASSWORD_KEY = 'skipMustChangePassword';
 export const SkipMustChangePassword = () => SetMetadata(SKIP_MUST_CHANGE_PASSWORD_KEY, true);
 

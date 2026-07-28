@@ -21,12 +21,10 @@ export type ActAccessHints = {
   canReturnToStructuring: boolean;
   hasStructuralChanges: boolean;
   requiresReviewBeforePublish: boolean;
-  /** Informativo (item 85) — não bloqueia mais por responsável exclusivo. */
+  /** Informativo (item 85) — não bloqueia por responsável exclusivo. */
   structureHint?: string;
   reviewHint?: string;
-  /** @deprecated use structureHint — mantido para UI antiga */
   structureBlockedReason?: string;
-  /** @deprecated use reviewHint */
   reviewBlockedReason?: string;
 };
 
@@ -40,7 +38,7 @@ function responsavelNome(
 
 /**
  * Item 85: responsáveis são organizacionais — não restringem autorização.
- * Bloqueios restantes: permissão geral + estágio do fluxo editorial.
+ * Bloqueios restantes: permissão geral.
  */
 export function structureBlockedReason(
   act: ActResponsibleFields,
@@ -49,16 +47,6 @@ export function structureBlockedReason(
   if (!user.permissions.includes('acts:write')) {
     return 'Sem permissão para editar o texto estruturado';
   }
-
-  // Em aguardando revisão, quem só estrutura sem poder revisar não altera até devolução.
-  if (
-    act.etapaEditorial === EditorialStage.aguardando_revisao &&
-    !user.permissions.includes('acts:publish') &&
-    !user.permissions.includes('acts:write')
-  ) {
-    return 'Aguardando revisão — devolva para estruturação ou conclua a revisão';
-  }
-
   return null;
 }
 
@@ -90,7 +78,8 @@ function structureHint(act: ActResponsibleFields): string | undefined {
     )}`;
   }
   if (
-    act.etapaEditorial === EditorialStage.aguardando_revisao &&
+    (act.etapaEditorial === EditorialStage.aguardando_revisao ||
+      act.etapaEditorial === EditorialStage.revisado) &&
     act.responsavelRevisaoId
   ) {
     return `Responsável preferencial pela revisão: ${responsavelNome(
@@ -112,7 +101,8 @@ export function buildActAccessHints(
 ): ActAccessHints {
   const hasStructuralChanges = Boolean(options?.hasStructuralChanges);
   const editable = options?.editable ?? true;
-  const fileOnly = options?.fileOnly ?? act.etapaEditorial === EditorialStage.somente_arquivo_original;
+  const fileOnly =
+    options?.fileOnly ?? act.etapaEditorial === EditorialStage.somente_arquivo_original;
 
   const structureReason = structureBlockedReason(act, user);
   const reviewReason = reviewBlockedReason(act, user);
@@ -124,16 +114,16 @@ export function buildActAccessHints(
 
   const requiresReviewBeforePublish = hasStructuralChanges && !fileOnly;
 
+  const inReviewPipeline =
+    act.etapaEditorial === EditorialStage.aguardando_revisao ||
+    act.etapaEditorial === EditorialStage.revisado;
+
   const canSubmitReview =
     canWrite &&
     editable &&
     !fileOnly &&
     hasStructuralChanges &&
-    (act.etapaEditorial === EditorialStage.em_estruturacao ||
-      act.etapaEditorial === EditorialStage.estruturado ||
-      (act.editionOpen &&
-        act.etapaEditorial !== EditorialStage.aguardando_revisao &&
-        act.etapaEditorial !== EditorialStage.revisado));
+    !inReviewPipeline;
 
   const canApproveReview =
     canReviewPerm && act.etapaEditorial === EditorialStage.aguardando_revisao;
@@ -143,12 +133,12 @@ export function buildActAccessHints(
 
   const canPublishByStage = (() => {
     if (!canPublishPerm || publishReason) return false;
-    if (fileOnly) return editable || act.editionOpen || act.statusPublicacao === PublicationStatus.rascunho;
+    if (fileOnly) {
+      return editable || act.editionOpen || act.statusPublicacao === PublicationStatus.rascunho;
+    }
     if (!requiresReviewBeforePublish) {
-      // Só metadados (ou sem estrutura) — publicação direta permitida
       return editable || act.editionOpen || act.statusPublicacao === PublicationStatus.em_revisao;
     }
-    // Estrutural: só após revisão formal
     return act.etapaEditorial === EditorialStage.revisado;
   })();
 
@@ -158,10 +148,7 @@ export function buildActAccessHints(
     canEditStructure: !structureReason,
     canReview: !reviewReason,
     canPublish: canPublishByStage,
-    canSubmitReview:
-      canSubmitReview &&
-      act.etapaEditorial !== EditorialStage.aguardando_revisao &&
-      act.etapaEditorial !== EditorialStage.revisado,
+    canSubmitReview,
     canApproveReview,
     canReturnToStructuring,
     hasStructuralChanges,
@@ -179,9 +166,6 @@ export function assertCanEditStructureForUser(
 ) {
   const reason = structureBlockedReason(act, user);
   if (reason) throw new ForbiddenException(reason);
-
-  // Em aguardando revisão, exige permissão de revisão (write ou publish) — já coberto por write.
-  // Qualquer usuário com acts:write pode estruturar; responsáveis não excluem.
 }
 
 export function assertCanReviewForUser(
@@ -201,7 +185,7 @@ export function assertCanPublishForUser(
 }
 
 export function assignmentPermissionWarnings(
-  userId: string,
+  _userId: string,
   permissions: string[],
 ): string[] {
   const warnings: string[] = [];

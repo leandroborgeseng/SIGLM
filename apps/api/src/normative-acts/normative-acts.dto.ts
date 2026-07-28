@@ -362,7 +362,7 @@ export class DeleteUnitDto {
 
 export class ReturnToStructuringDto {
   @IsString()
-  @MinLength(3)
+  @MinLength(3, { message: 'Informe uma justificativa com pelo menos 3 caracteres' })
   justificativa!: string;
 }
 
