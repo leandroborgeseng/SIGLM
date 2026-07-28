@@ -360,6 +360,12 @@ export class DeleteUnitDto {
   confirmEffectCleanup?: boolean;
 }
 
+export class ReturnToStructuringDto {
+  @IsString()
+  @MinLength(3)
+  justificativa!: string;
+}
+
 export class StructureFromOriginalDto {
   /** Obrigatório quando o ato já possui unidades — confirma substituição total. */
   @IsOptional()

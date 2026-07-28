@@ -58,6 +58,7 @@ import {
   publishAct,
   restoreUnitVersion,
   returnActToStructuring,
+  approveActReview,
   saveLegislativeEffects,
   saveUnits,
   startActStructuring,
@@ -285,8 +286,6 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
   /** Metadados/anexos podem ser editados; Texto Estruturado só após iniciar estruturação. */
   const structureEditable =
     editable && !isFileOnlyStage && (access?.canEditStructure ?? true);
-  const structureBlockedReason = access?.structureBlockedReason;
-  const reviewBlockedReason = access?.reviewBlockedReason;
   const dirty = fingerprint(currentMeta()) !== savedFingerprint.current;
 
   useEffect(() => {
@@ -863,22 +862,45 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
       await persistUnits();
       const updated = await submitForReview(act.id);
       syncFromAct(updated);
-      toast(
-        act.editionOpen ? 'Versão pronta para publicação' : 'Enviado para revisão',
-        'ok',
-      );
+      toast('Encaminhado para revisão', 'ok');
       router.refresh();
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Erro ao enviar', 'danger');
+      toast(e instanceof Error ? e.message : 'Erro ao encaminhar', 'danger');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApproveReview = async () => {
+    setSaving(true);
+    try {
+      if (editable && dirty) {
+        await updateAct(act.id, metaPayload());
+        if (units.length > 0) await persistUnits();
+      }
+      const updated = await approveActReview(act.id);
+      syncFromAct(updated);
+      toast('Revisão concluída — agora é possível publicar', 'ok');
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Erro ao concluir revisão', 'danger');
     } finally {
       setSaving(false);
     }
   };
 
   const handleReturnToStructuring = async () => {
+    const justificativa = window.prompt(
+      'Justificativa da devolução para estruturação (obrigatória):',
+    );
+    if (justificativa === null) return;
+    if (!justificativa.trim()) {
+      toast('Informe a justificativa da devolução', 'warn');
+      return;
+    }
     setSaving(true);
     try {
-      const updated = await returnActToStructuring(act.id);
+      const updated = await returnActToStructuring(act.id, justificativa.trim());
       syncFromAct(updated);
       toast('Ato devolvido para estruturação', 'ok');
       router.refresh();
@@ -894,7 +916,12 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     try {
       if (editable && dirty) {
         await updateAct(act.id, metaPayload());
-        if (units.length > 0) {
+        // Evita regravar units no estágio "revisado" (rebaixaria o fluxo sem necessidade).
+        if (
+          units.length > 0 &&
+          act.etapaEditorial !== 'revisado' &&
+          act.etapaEditorial !== 'aguardando_revisao'
+        ) {
           await persistUnits();
         }
       }
@@ -1030,19 +1057,12 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
     publicado: 'Publicado',
   };
 
-  const canPublish =
-    (access?.canPublish ?? can('acts:publish')) &&
-    (act.statusPublicacao === 'em_revisao' ||
-      (act.statusPublicacao === 'publicado' && Boolean(act.editionOpen)) ||
-      (act.statusPublicacao === 'rascunho' && isFileOnlyStage));
-  const canSubmitReview =
-    (access?.canEditStructure ?? can('acts:write')) &&
-    editable &&
-    act.statusPublicacao !== 'publicado' &&
-    !isFileOnlyStage;
-  const canReturnToStructuring =
-    (access?.canReview ?? can('acts:write')) &&
-    act.etapaEditorial === 'aguardando_revisao';
+  const canPublish = Boolean(access?.canPublish ?? false);
+  const canSubmitReview = Boolean(access?.canSubmitReview);
+  const canApproveReview = Boolean(access?.canApproveReview);
+  const canReturnToStructuring = Boolean(access?.canReturnToStructuring);
+  const structureHint = access?.structureHint ?? access?.structureBlockedReason;
+  const reviewHint = access?.reviewHint ?? access?.reviewBlockedReason;
   const sameResponsavel =
     responsavelEstruturacaoId &&
     responsavelRevisaoId &&
@@ -1181,9 +1201,30 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
               <Button
                 variant="tonal"
                 size="sm"
-                onClick={handleSubmitReview}
+                onClick={() => void handleSubmitReview()}
                 disabled={saving}
-                title={structureBlockedReason ?? undefined}
+                title={structureHint ?? undefined}
+              >
+                Encaminhar para revisão
+              </Button>
+            )}
+            {canApproveReview && (
+              <Button
+                variant="tonal"
+                size="sm"
+                onClick={() => void handleApproveReview()}
+                disabled={saving}
+                title={reviewHint ?? undefined}
+              >
+                Concluir revisão
+              </Button>
+            )}
+            {canReturnToStructuring && (
+              <Button
+                variant="outlined"
+                size="sm"
+                onClick={() => void handleReturnToStructuring()}
+                disabled={saving}
               >
                 Devolver para estruturação
               </Button>
@@ -1191,9 +1232,9 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
             {canPublish && (
               <Button
                 size="sm"
-                onClick={handlePublish}
+                onClick={() => void handlePublish()}
                 disabled={saving}
-                title={reviewBlockedReason ?? undefined}
+                title={reviewHint ?? undefined}
               >
                 {act.editionOpen ? 'Publicar nova versão' : 'Publicar'}
               </Button>
@@ -1233,12 +1274,37 @@ export function ActEditor({ initialAct }: { initialAct: EditorAct }) {
           exibindo a última versão publicada até você publicar esta correção.
         </div>
       )}
-      {structureBlockedReason && can('acts:write') && !isFileOnlyStage && (
-        <div className="mx-6 mt-4 flex gap-2 rounded-[10px] border border-warn/40 bg-warn/5 px-4 py-3 text-[13px] text-ink-2">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
-          <span>{structureBlockedReason}</span>
+      {structureHint && can('acts:write') && !isFileOnlyStage && !access?.structureBlockedReason && (
+        <div className="mx-6 mt-4 flex gap-2 rounded-[10px] border border-line bg-surface-2 px-4 py-3 text-[13px] text-ink-2">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
+          <span>{structureHint}</span>
         </div>
       )}
+      {access?.structureBlockedReason && can('acts:write') && !isFileOnlyStage && (
+        <div className="mx-6 mt-4 flex gap-2 rounded-[10px] border border-warn/40 bg-warn/5 px-4 py-3 text-[13px] text-ink-2">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+          <span>{access.structureBlockedReason}</span>
+        </div>
+      )}
+      {act.etapaEditorial === 'aguardando_revisao' && (
+        <div className="mx-6 mt-4 rounded-[10px] border border-brand/30 bg-brand/5 px-4 py-3 text-[13px] text-ink-2">
+          Estágio: <strong>Aguardando revisão</strong>. Conclua a revisão para liberar a
+          publicação, ou devolva para estruturação com justificativa.
+        </div>
+      )}
+      {act.etapaEditorial === 'revisado' && (
+        <div className="mx-6 mt-4 rounded-[10px] border border-ok/40 bg-ok/5 px-4 py-3 text-[13px] text-ink-2">
+          Estágio: <strong>Revisado</strong>. A próxima ação disponível é{' '}
+          <strong>Publicar</strong>.
+        </div>
+      )}
+      {access?.requiresReviewBeforePublish &&
+        act.etapaEditorial === 'em_estruturacao' &&
+        editable && (
+          <div className="mx-6 mt-4 rounded-[10px] border border-warn/40 bg-warn/5 px-4 py-3 text-[13px] text-ink-2">
+            Há alterações no Texto Estruturado. Encaminhe para revisão antes de publicar.
+          </div>
+        )}
 
       <div
         className={cn(

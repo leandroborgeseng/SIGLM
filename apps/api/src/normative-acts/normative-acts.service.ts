@@ -57,6 +57,7 @@ import {
   buildActSnapshot,
   diffSnapshots,
   recordInternalHistory,
+  actHasPendingStructuralChanges,
   type ActSnapshot,
 } from './act-versioning.utils';
 import { defaultIdentificacao, validateUnitsHierarchy } from './unit-hierarchy.utils';
@@ -1364,6 +1365,12 @@ export class NormativeActsService {
               responsavelRevisao: act.responsavelRevisao,
             },
             viewer,
+            {
+              hasStructuralChanges: await actHasPendingStructuralChanges(this.prisma, id),
+              editable:
+                act.statusPublicacao !== PublicationStatus.publicado || act.editionOpen,
+              fileOnly: act.etapaEditorial === EditorialStage.somente_arquivo_original,
+            },
           )
         : undefined,
       assignmentWarnings: assignmentWarnings.length ? [...new Set(assignmentWarnings)] : undefined,
@@ -1416,6 +1423,7 @@ export class NormativeActsService {
       withSnapshot: true,
     });
 
+    await this.demoteAfterStructuralEdit(actId, act.etapaEditorial);
     return this.getAdminById(actId, user);
   }
 
@@ -1862,6 +1870,8 @@ export class NormativeActsService {
       withSnapshot: true,
     });
 
+    await this.demoteAfterStructuralEdit(actId, act.etapaEditorial);
+
     return this.getAdminById(actId, user);
   }
 
@@ -1942,6 +1952,7 @@ export class NormativeActsService {
       withSnapshot: true,
     });
 
+    await this.demoteAfterStructuralEdit(actId, act.etapaEditorial);
     return this.getAdminById(actId, user);
   }
 
@@ -2096,18 +2107,38 @@ export class NormativeActsService {
       withSnapshot: true,
     });
 
+    await this.demoteAfterStructuralEdit(actId, act.etapaEditorial);
     return this.getAdminById(actId, user);
   }
 
   async submitForReview(id: string, user: AuthUser) {
     const act = await this.ensureActWithResponsibles(id);
-    // Quem estrutura envia para revisão; o revisor assume a etapa seguinte.
     assertCanEditStructureForUser(act, user);
     if (act.statusPublicacao === PublicationStatus.publicado && !act.editionOpen) {
       throw new BadRequestException('Ato publicado — crie uma nova versão para editar');
     }
+    if (act.etapaEditorial === EditorialStage.somente_arquivo_original) {
+      throw new BadRequestException('Inicie a estruturação antes de encaminhar para revisão');
+    }
     if (act.units.length === 0) {
       throw new BadRequestException('Adicione ao menos um dispositivo antes de enviar');
+    }
+    if (
+      act.etapaEditorial === EditorialStage.aguardando_revisao ||
+      act.etapaEditorial === EditorialStage.revisado
+    ) {
+      throw new BadRequestException(
+        act.etapaEditorial === EditorialStage.revisado
+          ? 'Ato já revisado — utilize Publicar'
+          : 'Ato já está aguardando revisão',
+      );
+    }
+
+    const structural = await actHasPendingStructuralChanges(this.prisma, id);
+    if (!structural) {
+      throw new BadRequestException(
+        'Não há alterações estruturais pendentes — a publicação de metadados não exige revisão',
+      );
     }
 
     // Versão de trabalho em ato já publicado permanece publicada; só rascunhos vão para em_revisao
@@ -2130,20 +2161,45 @@ export class NormativeActsService {
       actId: id,
       userId: user.id,
       acao: 'enviar_revisao',
-      resumo: act.editionOpen
-        ? 'Marcou versão de trabalho como pronta para publicação'
-        : 'Enviou para revisão',
+      resumo: `Encaminhou para revisão${this.responsaveisResumo(act)}`,
       withSnapshot: true,
     });
 
     return this.getAdminById(id, user);
   }
 
-  async returnToStructuring(id: string, user: AuthUser) {
+  async approveReview(id: string, user: AuthUser) {
+    const act = await this.ensureActWithResponsibles(id);
+    assertCanReviewForUser(act, user);
+    if (act.etapaEditorial !== EditorialStage.aguardando_revisao) {
+      throw new BadRequestException('Só é possível concluir a revisão de atos em “Aguardando revisão”');
+    }
+
+    await this.prisma.normativeAct.update({
+      where: { id },
+      data: { etapaEditorial: EditorialStage.revisado },
+    });
+
+    await recordInternalHistory(this.prisma, {
+      actId: id,
+      userId: user.id,
+      acao: 'aprovar_revisao',
+      resumo: `Concluiu a revisão${this.responsaveisResumo(act)}`,
+      withSnapshot: true,
+    });
+
+    return this.getAdminById(id, user);
+  }
+
+  async returnToStructuring(id: string, user: AuthUser, justificativa: string) {
     const act = await this.ensureActWithResponsibles(id);
     assertCanReviewForUser(act, user);
     if (act.etapaEditorial !== EditorialStage.aguardando_revisao) {
       throw new BadRequestException('Só é possível devolver atos em “Aguardando revisão”');
+    }
+    const motivo = justificativa?.trim();
+    if (!motivo) {
+      throw new BadRequestException('Informe a justificativa da devolução para estruturação');
     }
 
     await this.prisma.normativeAct.update({
@@ -2155,7 +2211,7 @@ export class NormativeActsService {
       actId: id,
       userId: user.id,
       acao: 'devolver_estruturacao',
-      resumo: 'Devolveu formalmente para estruturação',
+      resumo: `Devolveu para estruturação: ${motivo}${this.responsaveisResumo(act)}`,
       withSnapshot: true,
     });
 
@@ -2180,6 +2236,20 @@ export class NormativeActsService {
       if (!hasOriginal) {
         throw new BadRequestException(
           'Atos “Somente arquivo original” precisam do arquivo original anexado para publicar',
+        );
+      }
+    }
+
+    const structural = await actHasPendingStructuralChanges(this.prisma, id);
+    if (structural && !fileOnly) {
+      if (act.etapaEditorial === EditorialStage.aguardando_revisao) {
+        throw new BadRequestException(
+          'Conclua a revisão antes de publicar. Use “Concluir revisão” e depois “Publicar”.',
+        );
+      }
+      if (act.etapaEditorial !== EditorialStage.revisado) {
+        throw new BadRequestException(
+          'Há alterações estruturais não revisadas. Encaminhe para revisão, conclua a revisão e só então publique.',
         );
       }
     }
@@ -2231,8 +2301,8 @@ export class NormativeActsService {
       userId: user.id,
       acao: 'publicacao',
       resumo: isAdminCorrection
-        ? `Publicou correção administrativa (versão ${revisionNumber})`
-        : `Publicou versão ${revisionNumber}`,
+        ? `Publicou correção administrativa (versão ${revisionNumber})${this.responsaveisResumo(act)}`
+        : `Publicou versão ${revisionNumber}${this.responsaveisResumo(act)}`,
       revisionNumber,
       withSnapshot: true,
     });
@@ -2543,6 +2613,8 @@ export class NormativeActsService {
       withSnapshot: true,
     });
 
+    await this.demoteAfterStructuralEdit(actId, act.etapaEditorial);
+
     const ocrNote = usedOcr
       ? `Texto obtido via OCR (confiança média ${Math.round(mediaConfianca)}%). Revise cuidadosamente.`
       : undefined;
@@ -2681,6 +2753,35 @@ export class NormativeActsService {
       );
     }
     assertCanEditStructureForUser(act, user);
+  }
+
+  /**
+   * Após alteração estrutural: se já estava revisado (ou publicado estruturado em edição),
+   * volta para “Em estruturação” e exige novo encaminhamento. Em “Aguardando revisão” permanece
+   * (correções do revisor).
+   */
+  private async demoteAfterStructuralEdit(actId: string, etapa: EditorialStage) {
+    if (
+      etapa === EditorialStage.revisado ||
+      etapa === EditorialStage.estruturado
+    ) {
+      await this.prisma.normativeAct.update({
+        where: { id: actId },
+        data: { etapaEditorial: EditorialStage.em_estruturacao },
+      });
+    }
+  }
+
+  private responsaveisResumo(act: {
+    responsavelEstruturacao?: { nome: string } | null;
+    responsavelRevisao?: { nome: string } | null;
+  }) {
+    const est = act.responsavelEstruturacao?.nome;
+    const rev = act.responsavelRevisao?.nome;
+    const parts: string[] = [];
+    if (est) parts.push(`resp. estruturação: ${est}`);
+    if (rev) parts.push(`resp. revisão: ${rev}`);
+    return parts.length ? ` (${parts.join('; ')})` : '';
   }
 
   private async ensureActWithResponsibles(id: string) {
@@ -3065,6 +3166,7 @@ export class NormativeActsService {
       withSnapshot: true,
     });
 
+    await this.demoteAfterStructuralEdit(actId, act.etapaEditorial);
     return this.getAdminById(actId, user);
   }
 

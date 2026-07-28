@@ -261,3 +261,33 @@ export function diffSnapshots(a: ActSnapshot, b: ActSnapshot) {
     attachments: { added: attAdded, removed: attRemoved, changed: attChanged },
   };
 }
+
+/** Diff estrutural: units + efeitos legislativos (anexos/metadados não contam). */
+export function hasStructuralDiff(a: ActSnapshot, b: ActSnapshot): boolean {
+  const diff = diffSnapshots(a, b);
+  if (
+    diff.units.added.length > 0 ||
+    diff.units.removed.length > 0 ||
+    diff.units.changed.length > 0 ||
+    diff.units.orderChanged
+  ) {
+    return true;
+  }
+  return JSON.stringify(a.effects ?? []) !== JSON.stringify(b.effects ?? []);
+}
+
+export async function actHasPendingStructuralChanges(
+  prisma: PrismaService,
+  actId: string,
+): Promise<boolean> {
+  const current = await buildActSnapshot(prisma, actId);
+  const lastPub = await prisma.actPublicRevision.findFirst({
+    where: { actId, isCurrent: true },
+  });
+  if (!lastPub) {
+    return current.units.length > 0 || (current.effects?.length ?? 0) > 0;
+  }
+  const published = lastPub.snapshot as unknown as ActSnapshot;
+  return hasStructuralDiff(published, current);
+}
+

@@ -410,8 +410,15 @@ export function batchUpdateActs(payload: BatchUpdateActsPayload, token?: string)
   }, token);
 }
 
-export function returnActToStructuring(id: string, token?: string) {
+export function returnActToStructuring(id: string, justificativa: string, token?: string) {
   return adminFetch<AdminActDetail>(`/admin/acts/${id}/return-to-structuring`, {
+    method: 'POST',
+    body: JSON.stringify({ justificativa }),
+  }, token);
+}
+
+export function approveActReview(id: string, token?: string) {
+  return adminFetch<AdminActDetail>(`/admin/acts/${id}/approve-review`, {
     method: 'POST',
   }, token);
 }

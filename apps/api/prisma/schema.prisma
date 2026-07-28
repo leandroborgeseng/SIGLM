@@ -208,6 +208,7 @@ enum EditorialStage {
   somente_arquivo_original
   em_estruturacao
   aguardando_revisao
+  revisado
   estruturado
 }
 

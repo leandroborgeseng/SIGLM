@@ -182,6 +182,13 @@ export interface ActAccessHints {
   canEditStructure: boolean;
   canReview: boolean;
   canPublish: boolean;
+  canSubmitReview?: boolean;
+  canApproveReview?: boolean;
+  canReturnToStructuring?: boolean;
+  hasStructuralChanges?: boolean;
+  requiresReviewBeforePublish?: boolean;
+  structureHint?: string;
+  reviewHint?: string;
   structureBlockedReason?: string;
   reviewBlockedReason?: string;
 }

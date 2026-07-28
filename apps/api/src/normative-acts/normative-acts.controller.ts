@@ -21,6 +21,7 @@ import {
   BatchUpdateActsDto,
   CreateActDto,
   DeleteUnitDto,
+  ReturnToStructuringDto,
   SaveLegislativeEffectsDto,
   SaveUnitsDto,
   StructureFromOriginalDto,
@@ -254,10 +255,20 @@ export class AdminActsController {
     return this.acts.submitForReview(id, user);
   }
 
+  @Post(':id/approve-review')
+  @RequirePermissions('acts:write')
+  approveReview(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.acts.approveReview(id, user);
+  }
+
   @Post(':id/return-to-structuring')
   @RequirePermissions('acts:write')
-  returnToStructuring(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.acts.returnToStructuring(id, user);
+  returnToStructuring(
+    @Param('id') id: string,
+    @Body() dto: ReturnToStructuringDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.acts.returnToStructuring(id, user, dto.justificativa);
   }
 
   @Post(':id/create-edition')

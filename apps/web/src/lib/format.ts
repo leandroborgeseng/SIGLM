@@ -38,12 +38,14 @@ export type EditorialStage =
   | 'somente_arquivo_original'
   | 'em_estruturacao'
   | 'aguardando_revisao'
+  | 'revisado'
   | 'estruturado';
 
 export const ETAPA_EDITORIAL_LABELS: Record<EditorialStage, string> = {
   somente_arquivo_original: 'Somente arquivo original',
   em_estruturacao: 'Em estruturação',
   aguardando_revisao: 'Aguardando revisão',
+  revisado: 'Revisado',
   estruturado: 'Estruturado',
 };
 
@@ -51,6 +53,7 @@ export const ETAPAS_EDITORIAIS: EditorialStage[] = [
   'somente_arquivo_original',
   'em_estruturacao',
   'aguardando_revisao',
+  'revisado',
   'estruturado',
 ];
 

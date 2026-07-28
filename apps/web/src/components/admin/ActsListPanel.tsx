@@ -32,6 +32,7 @@ import {
 } from '@/lib/format';
 import type { AdminListResponse } from '@/lib/types';
 import { ActBatchBar } from '@/components/admin/ActBatchBar';
+import { StickyHorizontalScroll } from '@/components/admin/StickyHorizontalScroll';
 import { useAdminAuth } from '@/components/admin/AdminAuthContext';
 
 const STATUS_OPTS = [
@@ -45,6 +46,7 @@ const ETAPA_BADGE_VARIANT: Record<EditorialStage, 'neutral' | 'info' | 'warn' | 
   somente_arquivo_original: 'neutral',
   em_estruturacao: 'info',
   aguardando_revisao: 'warn',
+  revisado: 'ok',
   estruturado: 'ok',
 };
 
@@ -655,7 +657,11 @@ export function ActsListPanel({ initial }: { initial: AdminListResponse }) {
           </div>
         </div>
 
-        <div className="overflow-x-auto rounded-[14px] border border-line bg-surface shadow-sm">
+        <StickyHorizontalScroll
+          bottomOffset={
+            can('acts:write') && (selectedIds.size > 0 || selectAllFiltered) ? 72 : 0
+          }
+        >
           <table className="w-full min-w-[1280px] text-left text-[13.5px]">
             <thead>
               <tr className="border-b border-line-2 bg-surface-2">
@@ -918,7 +924,7 @@ export function ActsListPanel({ initial }: { initial: AdminListResponse }) {
               )}
             </tbody>
           </table>
-        </div>
+        </StickyHorizontalScroll>
 
         {data.totalPages > 1 && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[13px] text-ink-3">
