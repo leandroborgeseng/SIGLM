@@ -184,6 +184,85 @@ export class ExportService {
 
   async exportPdf(slugPath: string): Promise<{ buffer: Buffer; filename: string }> {
     const act = await this.getExportAct(slugPath);
+    return this.pdfFromExportAct(act);
+  }
+
+  /** PDF do ato pelo id (rascunho ou publicado) — uso administrativo. */
+  async exportPdfById(id: string): Promise<{ buffer: Buffer; filename: string }> {
+    const act = await this.prisma.normativeAct.findUnique({
+      where: { id },
+      include: {
+        meioPublicacao: true,
+        originOrgs: { orderBy: { ordem: 'asc' }, include: { orgao: true } },
+        signatories: { orderBy: { ordem: 'asc' } },
+        attachments: {
+          where: { ativo: true, tipo: 'arquivo_publicacao' },
+          take: 1,
+        },
+        units: { orderBy: { ordem: 'asc' } },
+        changesAsAlterada: {
+          include: { unit: { select: { id: true } } },
+        },
+      },
+    });
+    if (!act) throw new NotFoundException('Ato normativo não encontrado');
+
+    const orgaosOrigem = act.originOrgs.map((l) => ({
+      nome: l.orgao.nome,
+      sigla: l.orgao.sigla,
+    }));
+    const notesByUnit = new Map(
+      act.changesAsAlterada
+        .filter((c) => c.unitId)
+        .map((c) => [c.unitId!, c.notaGerada]),
+    );
+
+    const mapped: ExportAct & { codigo: string } = {
+      tipo: act.tipo,
+      numero: act.numero,
+      ano: act.ano,
+      ementa: act.ementa,
+      situacao: act.situacao,
+      assunto: act.assunto,
+      orgaoOrigem: orgaosOrigem.map((o) => o.nome).join('; ') || act.orgaoOrigem,
+      dataAto: act.dataAto,
+      dataPublicacao: act.dataPublicacao,
+      atoConjunto: act.atoConjunto,
+      prefixoTituloModo: act.prefixoTituloModo,
+      prefixoTitulo: act.prefixoTitulo,
+      orgaosOrigem,
+      meioPublicacao: act.meioPublicacao
+        ? { id: act.meioPublicacao.id, nome: act.meioPublicacao.nome }
+        : null,
+      arquivoPublicacaoUrl: act.attachments[0]
+        ? `/public/attachments/${act.attachments[0].id}/file`
+        : null,
+      signatarios: act.signatories.map((s) => ({
+        nome: s.nome,
+        cargo: s.cargo,
+        ordem: s.ordem,
+      })),
+      codigo: formatActCode(act.tipo, act.numero, act.ano, {
+        atoConjunto: act.atoConjunto,
+        prefixo: resolveTituloPrefixo(act.prefixoTituloModo, act.prefixoTitulo, orgaosOrigem),
+      }),
+      units: act.units.map((u) => ({
+        tipoUnidade: u.tipoUnidade,
+        identificacao: u.identificacao,
+        texto: u.texto,
+        formatacao: parseFormatacao(u.formatacao),
+        ordem: u.ordem,
+        status: u.status,
+        nota: notesByUnit.get(u.id) ?? null,
+      })),
+    };
+
+    return this.pdfFromExportAct(mapped);
+  }
+
+  private async pdfFromExportAct(
+    act: ExportAct & { codigo: string },
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const buffer = await this.renderPdf(act);
     const filename = `${act.codigo.replace(/\s+/g, '-').replace(/\//g, '-')}-consolidado.pdf`;
     return { buffer, filename };

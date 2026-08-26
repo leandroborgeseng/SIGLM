@@ -7,5 +7,6 @@ import { ExportService } from './export.service';
   imports: [PrismaModule],
   controllers: [ExportController],
   providers: [ExportService],
+  exports: [ExportService],
 })
 export class ExportModule {}

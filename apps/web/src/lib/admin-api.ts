@@ -1154,6 +1154,66 @@ export function structureActFromOriginal(
   );
 }
 
+export type KeywordExportKeyword = {
+  palavra: string;
+  total: number;
+};
+
+export type KeywordExportAct = {
+  id: string;
+  tipo: string;
+  numero: number;
+  ano: number;
+  ementa: string;
+  situacao: string;
+  statusPublicacao: string;
+  etapaEditorial: string;
+  slug: string;
+  assunto: string | null;
+  palavrasChave: string[];
+  dataPublicacao: string | null;
+  orgaoOrigem: string | null;
+  codigo: string;
+};
+
+export function listKeywordExportKeywords(token?: string) {
+  return adminFetch<KeywordExportKeyword[]>('/admin/keyword-export/keywords', undefined, token);
+}
+
+export function listKeywordExportActs(keyword: string, token?: string) {
+  const q = encodeURIComponent(keyword);
+  return adminFetch<KeywordExportAct[]>(`/admin/keyword-export?keyword=${q}`, undefined, token);
+}
+
+export async function downloadKeywordExportZip(keyword: string, actIds: string[]): Promise<void> {
+  const API_URL = getApiBaseUrl();
+  const res = await authorizedFetch(`${API_URL}/admin/keyword-export/zip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyword, actIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = Array.isArray(err.message) ? err.message.join(', ') : err.message;
+    throw new Error(msg ?? 'Erro ao gerar o ZIP');
+  }
+  const blob = await res.blob();
+  const disp = res.headers.get('Content-Disposition') ?? '';
+  const utf = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+  const plain = /filename="?([^"]+)"?/i.exec(disp);
+  const filename = utf
+    ? decodeURIComponent(utf[1])
+    : (plain?.[1] ?? `atos-palavra-chave.zip`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** Baixa backup completo (banco + uploads) — apenas admin_geral. */
 export async function downloadSystemBackup(): Promise<void> {
   const API_URL = getApiBaseUrl();

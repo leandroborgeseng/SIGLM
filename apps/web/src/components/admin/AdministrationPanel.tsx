@@ -38,11 +38,19 @@ import {
   type S3BackupStatus,
 } from '@/lib/admin-api';
 import { cn } from '@/lib/format';
+import { KeywordExportTab } from '@/components/admin/KeywordExportTab';
 import { PasswordField } from '@/components/admin/PasswordField';
 import { PermissionsTab } from '@/components/admin/PermissionsTab';
 import { passwordPolicyMessage } from '@/lib/password-policy';
 
-type Tab = 'usuarios' | 'orgaos' | 'meios' | 'signatarios' | 'permissoes' | 'backup';
+type Tab =
+  | 'usuarios'
+  | 'orgaos'
+  | 'meios'
+  | 'signatarios'
+  | 'permissoes'
+  | 'exportar'
+  | 'backup';
 
 export function AdministrationPanel() {
   const { toast } = useToast();
@@ -58,6 +66,7 @@ export function AdministrationPanel() {
       { id: 'meios', label: 'Meios de publicação' },
       { id: 'signatarios', label: 'Signatários' },
       { id: 'permissoes', label: 'Permissões' },
+      { id: 'exportar', label: 'Exportar por palavra-chave' },
     ];
     if (isSystemAdmin) {
       base.push({ id: 'backup', label: 'Backup e migração' });
@@ -125,7 +134,9 @@ export function AdministrationPanel() {
       </div>
 
       <div className="flex-1 overflow-auto p-4 sm:p-6">
-        {tab === 'backup' && isSystemAdmin ? (
+        {tab === 'exportar' ? (
+          <KeywordExportTab />
+        ) : tab === 'backup' && isSystemAdmin ? (
           <BackupTab />
         ) : loading ? (
           <p className="text-[14px] text-ink-3">Carregando…</p>
